@@ -42,7 +42,7 @@ const LOCAL_STORAGE_KEY = "solar-crm:v2";
 
 // URL CSV de tu Google Sheet (publicada como CSV)
 const SHEET_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/1-e7hMzSeyP9MhR3PKPs2KKYp-bnwFziHfxyrK6dnXFU/export?format=csv&gid=0";
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
 
 // Probabilidad automática por sub-etapa
 const SUBSTAGE_PROB: Record<SubStage, number> = {
