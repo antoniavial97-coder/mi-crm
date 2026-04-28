@@ -42,7 +42,7 @@ const LOCAL_STORAGE_KEY = "solar-crm:v2";
 
 // URL CSV de tu Google Sheet (publicada como CSV)
 const SHEET_CSV_URL =
- "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjlbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyPO4IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/1-e7hMzSeyP9MhR3PKPs2KKYp-bnwFziHfxyrK6dnXFU/export?format=csv&gid=0";
 
 // Probabilidad automática por sub-etapa
 const SUBSTAGE_PROB: Record<SubStage, number> = {
@@ -141,23 +141,49 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
+// Normaliza etapas del sheet al formato interno del CRM
+function normalizeStage(raw: string): Stage {
+  const s = raw.toLowerCase().trim();
+  if (s.includes("pipeline 1") || s.includes("pipeline p1") || s === "p1") return "Pipeline P1";
+  if (s.includes("pipeline 2") || s.includes("pipeline p2") || s === "p2") return "Pipeline P2";
+  if (s.includes("prospecto activo")) return "Prospecto Activo";
+  if (s.includes("prospecto pasivo")) return "Prospecto Pasivo";
+  if (s.includes("contacto")) return "Contacto";
+  // Si tiene "pipeline" sin número, asumir P1
+  if (s.includes("pipeline")) return "Pipeline P1";
+  return "Contacto";
+}
+
+// Normaliza sub-etapas del sheet al formato interno
+function normalizeSubStage(raw: string): SubStage | undefined {
+  const s = raw.toLowerCase().trim();
+  if (!s) return undefined;
+  if (s.includes("evaluación preliminar") || s.includes("evaluacion preliminar")) return "Evaluación preliminar";
+  if (s.includes("primera presentación") || s.includes("primera presentacion") || s.includes("presentación preliminar")) return "Primera presentación preliminar";
+  if (s.includes("visita técnica") || s.includes("visita tecnica")) return "Visita técnica realizada";
+  if (s.includes("evaluación final") || s.includes("evaluacion final")) return "Evaluación final";
+  if (s.includes("presentación final") || s.includes("presentacion final")) return "Presentación final";
+  if (s.includes("contrato en revisión") || s.includes("contrato en revision") || s.includes("revisión")) return "Contrato en revisión";
+  if (s.includes("contrato firmado") || s.includes("firmado")) return "Contrato firmado";
+  return undefined;
+}
+
 function parseCSVToClients(csv: string): ClientRecord[] {
   const lines = csv.trim().split("\n").filter(Boolean);
   if (lines.length < 2) return [];
 
   const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
 
-  // Columnas esperadas (flexibles): nombre/empresa, contacto, etapa, sub-etapa, mwp, probabilidad, ultimo_contacto, pendiente, notas
   const col = (name: string) => {
     const variants: Record<string, string[]> = {
       company: ["empresa", "companyname", "nombre empresa", "company", "nombre"],
       contact: ["contacto", "contactname", "nombre contacto", "contact"],
       stage: ["etapa", "stage", "fase"],
-      substage: ["sub-etapa", "substage", "sub etapa", "subestage"],
-      mwp: ["mwp", "mwp propuesta", "megawatts", "mw"],
-      prob: ["probabilidad", "prob", "closeprobabilitypct", "probabilidad cierre", "%"],
-      lastcontact: ["ultimo contacto", "lastcontactiso", "último contacto", "last contact"],
-      nextaction: ["pendiente", "nextaction", "próxima acción", "proxima accion", "accion"],
+      substage: ["subetapa", "sub-etapa", "substage", "sub etapa", "subestage"],
+      mwp: ["kwp", "mwp", "kw", "mw", "potencia"],
+      prob: ["probabilidad", "prob", "closeprobabilitypct", "%"],
+      lastcontact: ["ultimo contacto", "lastcontactiso", "último contacto", "last contact", "fecha"],
+      nextaction: ["pendiente", "nextaction", "próxima acción", "proxima accion", "accion", "comentario"],
       notes: ["notas", "notes", "observaciones"],
     };
     const keys = variants[name] ?? [name];
@@ -184,22 +210,19 @@ function parseCSVToClients(csv: string): ClientRecord[] {
     const get = (index: number) => (index >= 0 ? (cols[index] ?? "").trim() : "");
 
     const companyName = get(idx.company);
-    if (!companyName) continue; // saltar filas vacías
+    if (!companyName) continue;
 
-    const rawStage = get(idx.stage);
-    const stage = (STAGES.includes(rawStage as Stage) ? rawStage : "Contacto") as Stage;
+    const stage = normalizeStage(get(idx.stage));
+    const subStage = (stage === "Pipeline P1" || stage === "Pipeline P2")
+      ? normalizeSubStage(get(idx.substage))
+      : undefined;
 
-    const rawSubStage = get(idx.substage);
-    const subStage = (
-      stage === "Pipeline P1" && PIPELINE_SUBSTAGES.includes(rawSubStage as SubStage)
-        ? rawSubStage
-        : undefined
-    ) as SubStage | undefined;
+    // kWp → MWp (dividir por 1000 si el valor es mayor a 100, asumiendo que está en kWp)
+    const rawMwp = parseNumber(get(idx.mwp));
+    const mwp = rawMwp > 100 ? rawMwp / 1000 : rawMwp;
 
-    const mwp = parseNumber(get(idx.mwp));
     const probRaw = parseNumber(get(idx.prob));
-    const closeProbabilityPct =
-      subStage ? SUBSTAGE_PROB[subStage] : clamp(probRaw, 0, 100);
+    const closeProbabilityPct = subStage ? SUBSTAGE_PROB[subStage] : clamp(probRaw, 0, 100);
 
     clients.push({
       id: newId(),
