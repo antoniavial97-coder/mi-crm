@@ -195,6 +195,7 @@ function AIPendientesPanel({clients,onUpdateTasks}:{clients:ClientRecord[];onUpd
 } catch {
   result[client.id] = [{ id: newId(), text: client.nextAction, done: false }];
 }
+    }
     setLocalTasks(result);setLoading(false);setGenerated(true);
   }
 
