@@ -594,7 +594,10 @@ export default function Home(){
   const loadFromSheet=useCallback(async()=>{
     setSheetStatus("loading");
     try{
-      const [res1,res2]=await Promise.all([fetch(SHEET_CSV_URL),fetch(CONTACTS_CSV_URL)]);
+      const [res1,res2]=await Promise.all([
+  fetch(`/api/sheet-proxy?url=${encodeURIComponent(SHEET_CSV_URL)}`),
+  fetch(`/api/sheet-proxy?url=${encodeURIComponent(CONTACTS_CSV_URL)}`),
+]);
       if(!res1.ok)throw new Error();
       const csv1=await res1.text();
       const parsed=parseClientsCSV(csv1);
