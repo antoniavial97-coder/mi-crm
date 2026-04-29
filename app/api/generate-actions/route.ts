@@ -14,10 +14,7 @@ export async function POST(req: Request) {
       max_tokens: 300,
       messages: [{
         role: "user",
-        content: `Sos un asesor comercial de proyectos solares. Cliente: "${body.company}" (${body.stage}).
-Último movimiento registrado: "${body.comment}"
-Generá 2-4 acciones concretas y específicas que el vendedor debe hacer ahora para avanzar.
-Respondé SOLO con un JSON array de strings. Ejemplo: ["Acción 1","Acción 2"]`
+        content: `Sos un asesor comercial de proyectos solares. Cliente: "${body.company}" (${body.stage}). Último movimiento registrado: "${body.comment}". Generá 2-4 acciones concretas y específicas que el vendedor debe hacer ahora para avanzar. Respondé SOLO con un JSON array de strings. Ejemplo: ["Acción 1","Acción 2"]`
       }]
     })
   });
