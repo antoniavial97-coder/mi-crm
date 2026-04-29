@@ -4,17 +4,25 @@ export async function POST(req: Request) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return NextResponse.json({ error: "Sin API key" }, { status: 503 });
 
-  const body = await req.json() as { company: string; stage: string; comment: string };
+  const body = await req.json() as { company: string; stage: string; comment: string; transcripts?: string[] };
+
+  const transcriptContext = body.transcripts?.length
+    ? `\n\nTranscripciones de reuniones previas:\n${body.transcripts.map((t, i) => `Reunión ${i + 1}: ${t}`).join("\n\n")}`
+    : "";
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model: "claude-sonnet-4-5",
-      max_tokens: 300,
+      max_tokens: 400,
       messages: [{
         role: "user",
-        content: `Sos un asesor comercial de proyectos solares. Cliente: "${body.company}" (${body.stage}). Ultimo movimiento: "${body.comment}". Genera 2-3 acciones concretas que debe hacer el vendedor ahora. Responde SOLO con un JSON array de strings. Ejemplo: ["Accion 1","Accion 2"]`
+        content: `Sos un asesor comercial de proyectos solares. Cliente: "${body.company}" (${body.stage}).
+Último comentario del vendedor: "${body.comment}"${transcriptContext}
+
+Basándote en toda esta información, generá 2-4 acciones concretas y específicas que el vendedor debe hacer ahora para avanzar con este cliente.
+Respondé SOLO con un JSON array de strings. Ejemplo: ["Acción 1","Acción 2"]`
       }]
     })
   });
@@ -26,7 +34,7 @@ export async function POST(req: Request) {
 
   const data = await res.json() as { content?: Array<{ type?: string; text?: string }> };
   const text = data.content?.find(b => b.type === "text")?.text?.trim() ?? "";
-  
+
   if (!text) return NextResponse.json({ tasks: [] });
 
   try {
@@ -35,6 +43,6 @@ export async function POST(req: Request) {
     const tasks = JSON.parse(match ? match[0] : clean) as string[];
     return NextResponse.json({ tasks: Array.isArray(tasks) ? tasks : [] });
   } catch {
-    return NextResponse.json({ tasks: [text] });
+    return NextResponse.json({ tasks: [body.comment] });
   }
 }
