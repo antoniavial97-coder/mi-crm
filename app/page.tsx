@@ -187,9 +187,10 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      company: client.companyName,
-      stage: `${client.stage}${client.subStage ? ` · ${client.subStage}` : ""}`,
-      comment: client.nextAction
+     company: client.companyName,
+stage: `${client.stage}${client.subStage ? ` · ${client.subStage}` : ""}`,
+comment: client.nextAction,
+transcripts: transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).sort((a,b)=>a.date>b.date?-1:1).slice(0,3).map(t=>`[${t.date}] ${t.transcript}`)
     })
   });
   const data = await res.json() as { tasks?: string[] };
@@ -473,7 +474,7 @@ function Pipeline1Tab({clients,contacts,onEdit,onDelete,onUpdateTasks}:{clients:
           </div>
         ))}
       </div>
-      <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks}/>
+      <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
           const items=bySubStage.get(sub)??[];
