@@ -172,7 +172,15 @@ function parseCSVToClients(csv: string): ClientRecord[] {
   const lines = csv.trim().split("\n").filter(Boolean);
   if (lines.length < 2) return [];
 
-  const headers = parseCSVLine(lines[0]).map((h) => h.toLowerCase().trim());
+ // Buscar la primera fila que tenga contenido real (saltear filas vacías)
+  let headerLine = 0;
+  for (let i = 0; i < Math.min(5, lines.length); i++) {
+    const cols = parseCSVLine(lines[i]);
+    if (cols.some(c => c.trim().length > 1)) { headerLine = i; break; }
+  }
+  const headers = parseCSVLine(lines[headerLine]).map((h) => h.toLowerCase().trim());
+  // Ajustar el loop para empezar después del header
+  const dataStart = headerLine + 1;
 
   const col = (name: string) => {
     const variants: Record<string, string[]> = {
