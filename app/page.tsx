@@ -19,6 +19,7 @@ type ClientRecord = {
   aiTasks: ClientTask[]; createdAtISO: string; updatedAtISO: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
+type TranscriptInfo = { company: string; date: string; transcript: string; };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LOCAL_STORAGE_KEY = "solar-crm:v5";
@@ -169,7 +170,7 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
 }
 
 // ─── AI Pendientes Panel ──────────────────────────────────────────────────────
-function AIPendientesPanel({clients,onUpdateTasks}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void}){
+function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
   const [open,setOpen]=useState(false);
   const [loading,setLoading]=useState(false);
   const [generated,setGenerated]=useState(false);
@@ -592,6 +593,7 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
 export default function Home(){
   const [clients,setClients]=useState<ClientRecord[]>([]);
   const [contacts,setContacts]=useState<ContactInfo[]>([]);
+  const [transcripts,setTranscripts]=useState<TranscriptInfo[]>([]);
   const [sheetStatus,setSheetStatus]=useState<"idle"|"loading"|"ok"|"error">("idle");
   const [activeTab,setActiveTab]=useState<Tab>("dashboard");
   const [modalOpen,setModalOpen]=useState(false);
@@ -609,7 +611,29 @@ export default function Home(){
       if(!res1.ok)throw new Error();
       const csv1=await res1.text();
       const parsed=parseClientsCSV(csv1);
-      if(res2.ok){const csv2=await res2.text();setContacts(parseContactsCSV(csv2));}
+      const [res1,res2,res3]=await Promise.all([
+  fetch(`/api/sheet-proxy?url=${encodeURIComponent(SHEET_CSV_URL)}`),
+  fetch(`/api/sheet-proxy?url=${encodeURIComponent(CONTACTS_CSV_URL)}`),
+  fetch(`/api/sheet-proxy?url=${encodeURIComponent(TRANSCRIPTS_CSV_URL)}`),
+]);
+if(!res1.ok)throw new Error();
+const csv1=await res1.text();
+const parsed=parseClientsCSV(csv1);
+if(res2.ok){const csv2=await res2.text();setContacts(parseContactsCSV(csv2));}
+      function parseTranscriptsCSV(csv:string):TranscriptInfo[]{
+  const lines=csv.trim().split("\n").filter(Boolean); if(lines.length<2)return [];
+  let hLine=0; for(let i=0;i<Math.min(5,lines.length);i++){if(parseCSVLine(lines[i]).some(c=>c.trim().length>1)){hLine=i;break;}}
+  const hdrs=parseCSVLine(lines[hLine]).map(h=>h.toLowerCase().trim());
+  const col=(names:string[])=>hdrs.findIndex(h=>names.some(n=>h.includes(n)));
+  const idx={company:col(["empresa","company"]),date:col(["fecha","date"]),transcript:col(["transcripción","transcripcion","transcript","texto"])};
+  return lines.slice(hLine+1).map(line=>{
+    const cols=parseCSVLine(line);
+    const get=(i:number)=>(i>=0?(cols[i]??"").trim():"");
+    const company=get(idx.company); if(!company)return null;
+    return {company,date:get(idx.date),transcript:get(idx.transcript)};
+  }).filter(Boolean) as TranscriptInfo[];
+}
+if(res3.ok){const csv3=await res3.text();setTranscripts(parseTranscriptsCSV(csv3));}{const csv2=await res2.text();setContacts(parseContactsCSV(csv2));}
       if(parsed.length>0){
         const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
         const localMap=new Map(local.map(c=>[c.companyName.toLowerCase(),c]));
