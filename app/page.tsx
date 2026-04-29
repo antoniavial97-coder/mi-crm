@@ -715,7 +715,7 @@ export default function Home() {
     setSheetStatus("loading");
     try {
       const res = await fetch(
-        `/api/sheet-proxy?url=${encodeURIComponent(SHEET_CSV_URL)}`
+        SHEET_CSV_URL
       );
       if (!res.ok) throw new Error("Error al cargar la hoja");
       const csv = await res.text();
