@@ -42,7 +42,7 @@ const LOCAL_STORAGE_KEY = "solar-crm:v2";
 
 // URL CSV de tu Google Sheet (publicada como CSV)
 const SHEET_CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
+  "https://docs.google.com/spreadsheets/d/1-e7hMzSeyP9MhR3PKPs2KKYp-bnwFziHfxyrK6dnXFU/export?format=csv&gid=0";
 
 // Probabilidad automática por sub-etapa
 const SUBSTAGE_PROB: Record<SubStage, number> = {
@@ -207,7 +207,14 @@ function parseCSVToClients(csv: string): ClientRecord[] {
 
   for (let i = 1; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
+    // get con soporte para coma decimal (formato español)
     const get = (index: number) => (index >= 0 ? (cols[index] ?? "").trim() : "");
+    const getNum = (index: number) => {
+      const v = get(index);
+      // reemplazar coma decimal por punto
+      const n = Number(v.replace(/\./g, "").replace(",", ".").trim());
+      return Number.isFinite(n) ? n : 0;
+    };
 
     const companyName = get(idx.company);
     if (!companyName) continue;
@@ -217,11 +224,8 @@ function parseCSVToClients(csv: string): ClientRecord[] {
       ? normalizeSubStage(get(idx.substage))
       : undefined;
 
-    // kWp → MWp (dividir por 1000 si el valor es mayor a 100, asumiendo que está en kWp)
-    const rawMwp = parseNumber(get(idx.mwp));
-    const mwp = rawMwp > 100 ? rawMwp / 1000 : rawMwp;
-
-    const probRaw = parseNumber(get(idx.prob));
+    const mwp = getNum(idx.mwp);
+    const probRaw = getNum(idx.prob);
     const closeProbabilityPct = subStage ? SUBSTAGE_PROB[subStage] : clamp(probRaw, 0, 100);
 
     clients.push({
