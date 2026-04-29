@@ -213,7 +213,7 @@ function parseCSVToClients(csv: string): ClientRecord[] {
   const now = todayISO();
   const clients: ClientRecord[] = [];
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = dataStart; i < lines.length; i++) {
     const cols = parseCSVLine(lines[i]);
     // get con soporte para coma decimal (formato español)
     const get = (index: number) => (index >= 0 ? (cols[index] ?? "").trim() : "");
