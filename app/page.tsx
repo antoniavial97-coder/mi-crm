@@ -181,14 +181,20 @@ function AIPendientesPanel({clients,onUpdateTasks}:{clients:ClientRecord[];onUpd
     const result:Record<string,ClientTask[]>={};
     for(const client of clientsWithNotes){
       try{
-        const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,messages:[{role:"user",content:`Sos un asesor comercial de proyectos solares. Cliente: "${client.companyName}" (${client.stage}${client.subStage?` · ${client.subStage}`:""}).\n\nÚltimo movimiento registrado: "${client.nextAction}"\n\nBasándote en esto, generá una lista de 2-4 acciones concretas que el vendedor debe realizar ahora para avanzar con este cliente. Cada acción debe ser específica y accionable (ej: "Enviar correo a Pedro Bulnes confirmando fecha de visita técnica", "Llamar para seguimiento de propuesta", etc.)\n\nResponde SOLO con un JSON array de strings, sin explicaciones. Ejemplo: ["Acción 1","Acción 2"]`}]})});
-        const data=await res.json() as {content?:Array<{text?:string}>};
-        const text=data.content?.[0]?.text?.trim()??"[]";
-        let tasks:string[]=[];
-        try{const clean=text.replace(/```json|```/g,"").trim(); tasks=JSON.parse(clean);}catch{tasks=[client.nextAction];}
-        result[client.id]=(tasks.filter(Boolean) as string[]).map(t=>({id:newId(),text:t,done:false}));
-      }catch{result[client.id]=[{id:newId(),text:client.nextAction,done:false}];}
-    }
+  const res = await fetch("/api/generate-actions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      company: client.companyName,
+      stage: `${client.stage}${client.subStage ? ` · ${client.subStage}` : ""}`,
+      comment: client.nextAction
+    })
+  });
+  const data = await res.json() as { tasks?: string[] };
+  result[client.id] = (data.tasks || [client.nextAction]).map((t: string) => ({ id: newId(), text: t, done: false }));
+} catch {
+  result[client.id] = [{ id: newId(), text: client.nextAction, done: false }];
+}
     setLocalTasks(result);setLoading(false);setGenerated(true);
   }
 
