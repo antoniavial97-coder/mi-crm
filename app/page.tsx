@@ -13,13 +13,13 @@ type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
-  lastContactISO: string; nextAction: string; notes: string;
+  lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
   aiTasks: ClientTask[]; createdAtISO: string; updatedAtISO: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
 
-const LOCAL_STORAGE_KEY = "solar-crm:v5";
+const LOCAL_STORAGE_KEY = "solar-crm:v6";
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
 const CONTACTS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=652559693&single=true&output=csv";
 const TRANSCRIPTS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=1050795278&single=true&output=csv";
@@ -30,9 +30,10 @@ const SUBSTAGE_PROB: Record<SubStage,number> = {
   "Visita técnica realizada":15,"Presentación final":25,
   "Contrato en revisión":50,"Contrato firmado":100,
 };
+// Meses de cierre estimado por subetapa (si no hay fecha real de presentación)
 const SUBSTAGE_MONTHS: Record<SubStage,number> = {
   "Evaluación preliminar":8,"Primera presentación preliminar":8,
-  "Visita técnica realizada":7,"Presentación final":3,
+  "Visita técnica realizada":7,"Presentación final":5,
   "Contrato en revisión":2,"Contrato firmado":0,
 };
 const P1_SUBSTAGE_ORDER: SubStage[] = [
@@ -49,14 +50,38 @@ const D = {
 const fontStyle = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap'); *{font-family:'DM Sans',sans-serif;}`;
 const iStyle: React.CSSProperties = {width:"100%",padding:"9px 12px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",color:D.ink,outline:"none",boxSizing:"border-box"};
 
+// ─── Utils ────────────────────────────────────────────────────────────────────
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function addDays(iso:string,days:number){const d=new Date(iso);d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
 function isPast(iso:string){return new Date(iso)<new Date();}
 function newId(){if(typeof crypto!=="undefined"&&"randomUUID" in crypto)return (crypto as unknown as {randomUUID:()=>string}).randomUUID();return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;}
-function closingDate(subStage:SubStage|undefined):Date|null{if(!subStage||subStage==="Contrato firmado")return null;const months=SUBSTAGE_MONTHS[subStage];const today=new Date();return new Date(today.getFullYear(),today.getMonth()+months,today.getDate());}
-function closingMonthKey(subStage:SubStage|undefined):string|null{const d=closingDate(subStage);if(!d)return null;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
-function monthLabel(key:string){const [y,m]=key.split("-");const names=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];return `${names[parseInt(m)-1]} ${y}`;}
 
+// Calcula fecha de cierre estimada.
+// Si es "Presentación final" y hay stageDate, usa stageDate + 5 meses.
+// Si no, usa hoy + SUBSTAGE_MONTHS meses.
+function closingDate(subStage:SubStage|undefined, stageDate?:string):Date|null{
+  if(!subStage||subStage==="Contrato firmado")return null;
+  if(subStage==="Presentación final"&&stageDate){
+    const base=new Date(stageDate);
+    if(!isNaN(base.getTime()))return new Date(base.getFullYear(),base.getMonth()+5,base.getDate());
+  }
+  const months=SUBSTAGE_MONTHS[subStage];
+  const today=new Date();
+  return new Date(today.getFullYear(),today.getMonth()+months,today.getDate());
+}
+function closingMonthKey(subStage:SubStage|undefined, stageDate?:string):string|null{
+  const d=closingDate(subStage,stageDate);
+  if(!d)return null;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+}
+function monthLabel(key:string){const [y,m]=key.split("-");const names=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];return `${names[parseInt(m)-1]} ${y}`;}
+function formatDateShort(iso:string):string{
+  if(!iso)return "";
+  const d=new Date(iso);if(isNaN(d.getTime()))return iso;
+  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
+}
+
+// ─── CSV Parsers ──────────────────────────────────────────────────────────────
 function parseCSVLine(line:string):string[]{const r:string[]=[]; let c="",q=false; for(let i=0;i<line.length;i++){const ch=line[i]; if(ch==='"'){if(q&&line[i+1]==='"'){c+='"';i++;}else q=!q;}else if(ch===','&&!q){r.push(c.trim());c="";}else c+=ch;}r.push(c.trim());return r;}
 function normalizeStage(raw:string):Stage{const s=raw.toLowerCase().trim(); if(s.includes("pipeline 1")||s.includes("pipeline p1")||s==="p1")return "Pipeline P1"; if(s.includes("pipeline 2")||s.includes("pipeline p2")||s==="p2")return "Pipeline P2"; if(s.includes("prospecto activo"))return "Prospecto Activo"; if(s.includes("prospecto pasivo"))return "Prospecto Pasivo"; if(s.includes("pipeline"))return "Pipeline P1"; return "Prospecto Pasivo";}
 function normalizeSubStage(raw:string):SubStage|undefined{const s=raw.toLowerCase().trim(); if(!s)return undefined; if(s.includes("evaluación preliminar")||s.includes("evaluacion preliminar"))return "Evaluación preliminar"; if(s.includes("primera presentación")||s.includes("primera presentacion")||s.includes("presentación preliminar")||s.includes("presentacion preliminar"))return "Primera presentación preliminar"; if(s.includes("visita técnica")||s.includes("visita tecnica"))return "Visita técnica realizada"; if(s.includes("presentación final")||s.includes("presentacion final"))return "Presentación final"; if(s.includes("revisión")||s.includes("revision")||s.includes("contrato en"))return "Contrato en revisión"; if(s.includes("firmado")||s.includes("firma"))return "Contrato firmado"; return undefined;}
@@ -65,8 +90,8 @@ function parseClientsCSV(csv:string):ClientRecord[]{
   const lines=csv.trim().split("\n").filter(Boolean); if(lines.length<2)return [];
   let hLine=0; for(let i=0;i<Math.min(5,lines.length);i++){if(parseCSVLine(lines[i]).some(c=>c.trim().length>1)){hLine=i;break;}}
   const hdrs=parseCSVLine(lines[hLine]).map(h=>h.toLowerCase().trim());
-  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
-  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes")};
+  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"],stagedate:["fecha etapa","fecha_etapa","stagedate","fechaetapa","fecha de etapa"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
+  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes"),stagedate:col("stagedate")};
   const now=todayISO();
   return lines.slice(hLine+1).map(line=>{
     const cols=parseCSVLine(line);
@@ -76,8 +101,9 @@ function parseClientsCSV(csv:string):ClientRecord[]{
     const stage=normalizeStage(get(idx.stage));
     const subStage=(stage==="Pipeline P1"||stage==="Pipeline P2")?normalizeSubStage(get(idx.substage)):undefined;
     const mwp=getNum(idx.mwp);
+    const stageDate=idx.stagedate>=0?get(idx.stagedate):undefined;
     let prob=0; if(stage==="Pipeline P2")prob=5; else if(stage==="Pipeline P1"&&subStage)prob=SUBSTAGE_PROB[subStage];
-    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),aiTasks:[],createdAtISO:now,updatedAtISO:now};
+    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,aiTasks:[],createdAtISO:now,updatedAtISO:now};
   }).filter(Boolean) as ClientRecord[];
 }
 
@@ -115,7 +141,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     id:x.id!,companyName:x.companyName??"",contactName:x.contactName??"",
     stage:(x.stage as Stage)??"Prospecto Pasivo",subStage:x.subStage as SubStage|undefined,
     mwp:typeof x.mwp==="number"?x.mwp:0,closeProbabilityPct:typeof x.closeProbabilityPct==="number"?x.closeProbabilityPct:0,
-    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",
+    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -123,6 +149,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
   }));}catch{return [];}}
 
+// ─── Modal ────────────────────────────────────────────────────────────────────
 function Modal({open,title,children,onClose}:{open:boolean;title:string;children:React.ReactNode;onClose:()=>void}){
   const ref=useRef<HTMLDivElement|null>(null);
   useEffect(()=>{if(!open)return; const fn=(e:KeyboardEvent)=>{if(e.key==="Escape")onClose();}; window.addEventListener("keydown",fn); return ()=>window.removeEventListener("keydown",fn);},[open,onClose]);
@@ -140,6 +167,17 @@ function Modal({open,title,children,onClose}:{open:boolean;title:string;children
   );
 }
 
+// ─── Contact Popup con botón copiar email ─────────────────────────────────────
+function CopyButton({text}:{text:string}){
+  const [copied,setCopied]=useState(false);
+  function copy(){navigator.clipboard.writeText(text).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1500);});}
+  return(
+    <button onClick={copy} title="Copiar correo" style={{background:"none",border:"none",cursor:"pointer",padding:"0 0 0 4px",color:copied?"#22c55e":D.ink3,fontSize:"11px",verticalAlign:"middle"}}>
+      {copied?"✓":"⧉"}
+    </button>
+  );
+}
+
 function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[];companyName:string;contactName:string}){
   const [show,setShow]=useState(false);
   const ref=useRef<HTMLDivElement>(null);
@@ -152,12 +190,16 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
         {contactName}
       </button>
       {show&&(
-        <div style={{position:"absolute",top:"100%",left:0,zIndex:40,marginTop:"4px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",boxShadow:"0 8px 32px rgba(0,0,0,0.12)",padding:"12px 16px",minWidth:"220px",whiteSpace:"nowrap"}}>
+        <div style={{position:"absolute",top:"100%",left:0,zIndex:40,marginTop:"4px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",boxShadow:"0 8px 32px rgba(0,0,0,0.12)",padding:"12px 16px",minWidth:"240px",whiteSpace:"nowrap"}}>
           {matches.length?(
             matches.map((m,i)=>(
               <div key={i} style={{marginBottom:i<matches.length-1?"10px":"0"}}>
                 <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>{m.name||contactName}</div>
-                {m.email&&<div style={{fontSize:"11px",color:D.ink2,marginBottom:"2px"}}>✉ {m.email}</div>}
+                {m.email&&(
+                  <div style={{fontSize:"11px",color:D.ink2,marginBottom:"2px",display:"flex",alignItems:"center"}}>
+                    ✉ {m.email}<CopyButton text={m.email}/>
+                  </div>
+                )}
                 {m.phone&&<div style={{fontSize:"11px",color:D.ink2}}>📞 {m.phone}</div>}
                 {!m.email&&!m.phone&&<div style={{fontSize:"11px",color:D.ink3}}>Sin datos de contacto aún</div>}
               </div>
@@ -171,17 +213,29 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
   );
 }
 
+// ─── AI Pendientes Panel ──────────────────────────────────────────────────────
+// Genera tareas para TODOS los clientes que tienen comentario O transcripciones
 function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
   const [open,setOpen]=useState(false);
   const [loading,setLoading]=useState(false);
   const [generated,setGenerated]=useState(false);
   const [localTasks,setLocalTasks]=useState<Record<string,ClientTask[]>>({});
-  const clientsWithNotes=useMemo(()=>clients.filter(c=>c.nextAction?.trim()),[clients]);
+
+  // Clientes con comentario O con transcripciones en Hoja 3
+  const clientsToProcess=useMemo(()=>{
+    const companiesWithTranscripts=new Set(transcripts.map(t=>t.company.toLowerCase()));
+    return clients.filter(c=>c.nextAction?.trim()||companiesWithTranscripts.has(c.companyName.toLowerCase()));
+  },[clients,transcripts]);
 
   async function generar(){
-    if(!clientsWithNotes.length)return; setLoading(true);setGenerated(false);
+    if(!clientsToProcess.length)return; setLoading(true);setGenerated(false);
     const result:Record<string,ClientTask[]>={};
-    for(const client of clientsWithNotes){
+    for(const client of clientsToProcess){
+      const clientTranscripts=transcripts
+        .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
+        .sort((a,b)=>a.date>b.date?-1:1)
+        .slice(0,3)
+        .map(t=>`[${t.date}] ${t.transcript}`);
       try{
         const res=await fetch("/api/generate-actions",{
           method:"POST",
@@ -189,13 +243,16 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
           body:JSON.stringify({
             company:client.companyName,
             stage:`${client.stage}${client.subStage?` · ${client.subStage}`:""}`,
-            comment:client.nextAction,
-            transcripts:transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).sort((a,b)=>a.date>b.date?-1:1).slice(0,3).map(t=>`[${t.date}] ${t.transcript}`)
+            comment:client.nextAction||"(sin comentario anotado)",
+            transcripts:clientTranscripts
           })
         });
         const data=await res.json() as {tasks?:string[]};
-        result[client.id]=(data.tasks||[client.nextAction]).map((t:string)=>({id:newId(),text:t,done:false}));
-      }catch{result[client.id]=[{id:newId(),text:client.nextAction,done:false}];}
+        result[client.id]=(data.tasks||[]).map((t:string)=>({id:newId(),text:t,done:false}));
+      }catch{
+        if(client.nextAction)result[client.id]=[{id:newId(),text:client.nextAction,done:false}];
+        else result[client.id]=[];
+      }
     }
     setLocalTasks(result);setLoading(false);setGenerated(true);
   }
@@ -209,9 +266,8 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
         const followUp:FollowUp|undefined=done&&isEmail&&!t.followUp?{id:newId(),text:`Esperar respuesta — ${t.text.substring(0,60)}`,dueDateISO:addDays(todayISO(),5),done:false,dismissed:false}:t.followUp;
         return {...t,done,followUp};
       });
-      const updated={...prev,[clientId]:tasks};
       onUpdateTasks(clientId,tasks);
-      return updated;
+      return {...prev,[clientId]:tasks};
     });
   }
 
@@ -263,7 +319,7 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
             <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,${D.accent},${D.accentY})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",flexShrink:0}}>✦</div>
             <div style={{textAlign:"left"}}>
               <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Acciones recomendadas por IA</div>
-              <div style={{fontSize:"11px",color:D.ink3}}>{clientsWithNotes.length} cliente{clientsWithNotes.length!==1?"s":""} con comentarios</div>
+              <div style={{fontSize:"11px",color:D.ink3}}>{clientsToProcess.length} cliente{clientsToProcess.length!==1?"s":""} con comentarios o transcripciones</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
@@ -274,7 +330,7 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
         {open&&(
           <div style={{borderTop:`1px solid ${D.border}`,padding:"1rem 1.25rem 1.25rem"}}>
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"1rem"}}>
-              <button onClick={generar} disabled={loading||!clientsWithNotes.length} style={{padding:"7px 16px",borderRadius:"10px",border:"none",background:loading?D.border:`linear-gradient(135deg,${D.accent},${D.accentY})`,color:loading?D.ink3:D.white,fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
+              <button onClick={generar} disabled={loading||!clientsToProcess.length} style={{padding:"7px 16px",borderRadius:"10px",border:"none",background:loading?D.border:`linear-gradient(135deg,${D.accent},${D.accentY})`,color:loading?D.ink3:D.white,fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
                 {loading?"Analizando…":generated?"↻ Regenerar":"✦ Generar con IA"}
               </button>
             </div>
@@ -282,16 +338,19 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
             {loading&&<div style={{display:"flex",flexDirection:"column",gap:"8px"}}>{[...Array(3)].map((_,i)=><div key={i} style={{height:"56px",borderRadius:"10px",background:D.bg}}/>)}</div>}
             {generated&&!loading&&(
               <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                {clientsWithNotes.map(client=>{
+                {clientsToProcess.map(client=>{
                   const tasks=localTasks[client.id]||[];
+                  const hasTranscripts=transcripts.some(t=>t.company.toLowerCase()===client.companyName.toLowerCase());
                   return(
                     <div key={client.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"8px",display:"flex",alignItems:"center",gap:"8px"}}>
+                      <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px"}}>
                         <span style={{width:"6px",height:"6px",borderRadius:"50%",background:D.accent,flexShrink:0,display:"inline-block"}}/>
                         {client.companyName}
                         {client.subStage&&<span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>· {client.subStage}</span>}
+                        {hasTranscripts&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>+ Diio</span>}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                        {tasks.length===0&&<div style={{fontSize:"11px",color:D.ink3}}>Sin tareas generadas</div>}
                         {tasks.map(task=>(
                           <div key={task.id}>
                             <label style={{display:"flex",alignItems:"flex-start",gap:"8px",cursor:"pointer"}}>
@@ -306,7 +365,6 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
                             )}
                           </div>
                         ))}
-                        {tasks.length===0&&<div style={{fontSize:"11px",color:D.ink3}}>Sin tareas generadas</div>}
                       </div>
                     </div>
                   );
@@ -320,6 +378,7 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
   );
 }
 
+// ─── Dashboard Charts ─────────────────────────────────────────────────────────
 function ProbChart({clients}:{clients:ClientRecord[]}){
   const data=useMemo(()=>{
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
@@ -364,7 +423,12 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
     for(let y=2026;y<=2027;y++){const start=y===2026?4:0; const end=y===2026?11:4; for(let m=start;m<=end;m++){months.push(`${y}-${String(m+1).padStart(2,"0")}`);}}
     const byMonth:Record<string,{mwp:number;mwpW:number;clients:Array<{name:string;mwp:number;prob:number}>}>={}; for(const m of months)byMonth[m]={mwp:0,mwpW:0,clients:[]};
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-    for(const c of pipeline){if(!c.subStage||c.subStage==="Contrato firmado")continue; const key=closingMonthKey(c.subStage); if(key&&byMonth[key]){byMonth[key].mwp+=c.mwp; byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100); byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}}
+    for(const c of pipeline){
+      if(!c.subStage||c.subStage==="Contrato firmado")continue;
+      // Usa fecha real de presentación si existe
+      const key=closingMonthKey(c.subStage,c.stageDate);
+      if(key&&byMonth[key]){byMonth[key].mwp+=c.mwp; byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100); byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}
+    }
     let acc=0; return months.map(m=>{acc+=byMonth[m].mwpW; return {...byMonth[m],key:m,label:monthLabel(m),acc};});
   },[clients]);
   const maxMwp=Math.max(...data.map(d=>d.mwpW),0.01);
@@ -410,8 +474,11 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
+// ─── Client Card ─────────────────────────────────────────────────────────────
 function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
   const isSigned=client.subStage==="Contrato firmado";
+  const isPresentacion=client.subStage==="Presentación final";
+  const closingD=isPresentacion&&client.stageDate?closingDate(client.subStage,client.stageDate):null;
   return(
     <div style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"14px",transition:"box-shadow 0.15s"}}
       onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.07)")}
@@ -431,7 +498,17 @@ function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;conta
           <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
         </div>
       </div>
-      {client.subStage&&<div style={{marginBottom:"8px"}}><span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span></div>}
+      {client.subStage&&(
+        <div style={{marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+          <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
+          {isPresentacion&&client.stageDate&&(
+            <span style={{fontSize:"10px",color:D.ink3}}>
+              Pres. {formatDateShort(client.stageDate)}
+              {closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
+            </span>
+          )}
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:client.nextAction?"8px":"0"}}>
         <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>MWp</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.mwp.toFixed(2)}</div></div>
         <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>Prob.</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div></div>
@@ -441,6 +518,35 @@ function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;conta
   );
 }
 
+// ─── Prospecto Row (lista simple) ─────────────────────────────────────────────
+function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
+  const match=contacts.find(c=>c.company.toLowerCase()===client.companyName.toLowerCase());
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 14px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",transition:"box-shadow 0.15s"}}
+      onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 2px 12px rgba(0,0,0,0.06)")}
+      onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"2px"}}>{client.companyName}</div>
+        <div style={{fontSize:"11px",color:D.ink3,display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
+          {match?.name&&<span>{match.name}</span>}
+          {match?.phone&&<span>📞 {match.phone}</span>}
+          {match?.email&&(
+            <span style={{display:"flex",alignItems:"center",gap:"2px"}}>
+              ✉ {match.email}<CopyButton text={match.email}/>
+            </span>
+          )}
+          {!match&&client.contactName&&<span>{client.contactName}</span>}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:"4px",flexShrink:0}}>
+        <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
+        <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab Views ────────────────────────────────────────────────────────────────
 function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
   const bySubStage=useMemo(()=>{const m=new Map<SubStage,ClientRecord[]>(); for(const s of P1_SUBSTAGE_ORDER)m.set(s,[]); for(const c of p1){const k=c.subStage??("Evaluación preliminar" as SubStage); m.get(k)?.push(c);} return m;},[p1]);
@@ -506,10 +612,13 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
       {[{label:"Prospectos Activos",items:activos},{label:"Prospectos Pasivos",items:pasivos}].map(({label,items})=>(
         <div key={label}>
           <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
-            <div style={{width:"3px",height:"14px",borderRadius:"2px",background:D.accentY}}/>{label} <span style={{fontSize:"12px",color:D.ink3,fontWeight:400}}>· {items.length} clientes</span>
+            <div style={{width:"3px",height:"14px",borderRadius:"2px",background:D.accentY}}/>{label}
+            <span style={{fontSize:"12px",color:D.ink3,fontWeight:400}}>· {items.length} clientes</span>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
-            {items.length?items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} onEdit={onEdit} onDelete={onDelete}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"1.5rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>Sin clientes</div>)}
+          <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+            {items.length?items.map(c=><ProspectoRow key={c.id} client={c} contacts={contacts} onEdit={onEdit} onDelete={onDelete}/>):(
+              <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"1.5rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>Sin clientes</div>
+            )}
           </div>
         </div>
       ))}
@@ -517,8 +626,9 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
   );
 }
 
+// ─── Edit/Create Modal Form ───────────────────────────────────────────────────
 type ClientDraft=Omit<ClientRecord,"id"|"createdAtISO"|"updatedAtISO">;
-const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",aiTasks:[]};
+const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[]};
 
 function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtract}:{draft:ClientDraft;setDraft:React.Dispatch<React.SetStateAction<ClientDraft>>;onSave:()=>void;onCancel:()=>void;extractTasksLoading:boolean;onExtract:()=>void}){
   const prob=draft.stage==="Pipeline P2"?5:draft.stage==="Pipeline P1"&&draft.subStage?SUBSTAGE_PROB[draft.subStage]:0;
@@ -540,6 +650,9 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
         </div>
         <div><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>MWp</div><input inputMode="decimal" value={String(draft.mwp)} onChange={e=>{const n=Number(e.target.value.replace(",",".")); setDraft(d=>({...d,mwp:Number.isFinite(n)?n:0}));}} style={iStyle}/></div>
         <div><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Probabilidad</div><div style={{...iStyle,background:D.bg,color:D.ink3,cursor:"default"}}>{prob?`${prob}%${draft.subStage?` — ${draft.subStage}`:""}`:draft.stage==="Pipeline P2"?"5%":"—"}</div></div>
+        {draft.subStage==="Presentación final"&&(
+          <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Fecha presentación final <span style={{color:D.ink3,fontWeight:400}}>(se usa para calcular cierre estimado)</span></div><input type="date" value={draft.stageDate||""} onChange={e=>setDraft(d=>({...d,stageDate:e.target.value||undefined}))} style={iStyle}/></div>
+        )}
         <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Comentario / último movimiento</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder="¿Qué pasó? ¿Qué falta hacer?"/></div>
         <div style={{gridColumn:"1/-1"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
@@ -557,6 +670,7 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
   );
 }
 
+// ─── Main ─────────────────────────────────────────────────────────────────────
 export default function Home(){
   const [clients,setClients]=useState<ClientRecord[]>([]);
   const [contacts,setContacts]=useState<ContactInfo[]>([]);
@@ -595,7 +709,7 @@ export default function Home(){
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
-  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,aiTasks:c.aiTasks});setModalOpen(true);}
+  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
   function saveClient(){
     if(!draft.companyName.trim()){window.alert("Ingresa el nombre de la empresa.");return;}
@@ -622,8 +736,8 @@ export default function Home(){
       totalPipeline:pipeline.length,
       mwpP1:p1Active.reduce((s,c)=>s+(c.mwp||0),0),
       mwpFirmado:signed.reduce((s,c)=>s+(c.mwp||0),0),
-      mwpProb2026:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage);return d&&d.getFullYear()===2026;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
-      mwpProb2027:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage);return d&&d.getFullYear()===2027;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
+      mwpProb2026:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2026;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
+      mwpProb2027:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2027;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
     };
   },[clients]);
 
