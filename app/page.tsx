@@ -16,13 +16,13 @@ type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
   lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
-  aiTasks: ClientTask[]; meetings: Meeting[]; createdAtISO: string; updatedAtISO: string;
+  aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; createdAtISO: string; updatedAtISO: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LOCAL_STORAGE_KEY = "solar-crm:v7";
+const LOCAL_STORAGE_KEY = "solar-crm:v8";
 const ANNUAL_GOAL_MWP = 6;
 const START_MONTH = "2026-03"; // Marzo 2026
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
@@ -79,8 +79,8 @@ function parseClientsCSV(csv:string):ClientRecord[]{
   const lines=csv.trim().split("\n").filter(Boolean); if(lines.length<2)return [];
   let hLine=0; for(let i=0;i<Math.min(5,lines.length);i++){if(parseCSVLine(lines[i]).some(c=>c.trim().length>1)){hLine=i;break;}}
   const hdrs=parseCSVLine(lines[hLine]).map(h=>h.toLowerCase().trim());
-  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"],stagedate:["fecha etapa","fecha_etapa","stagedate","fechaetapa","fecha de etapa"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
-  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes"),stagedate:col("stagedate")};
+  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"],stagedate:["fecha etapa","fecha_etapa","stagedate","fechaetapa","fecha de etapa"],salesforce:["salesforce"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
+  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes"),stagedate:col("stagedate"),salesforce:col("salesforce")};
   const now=todayISO();
   return lines.slice(hLine+1).map(line=>{
     const cols=parseCSVLine(line);
@@ -91,8 +91,9 @@ function parseClientsCSV(csv:string):ClientRecord[]{
     const subStage=(stage==="Pipeline P1"||stage==="Pipeline P2")?normalizeSubStage(get(idx.substage)):undefined;
     const mwp=getNum(idx.mwp);
     const stageDate=idx.stagedate>=0?get(idx.stagedate):undefined;
+    const salesforce=idx.salesforce>=0?/^s[ií]/i.test(get(idx.salesforce)):false;
     let prob=0; if(stage==="Pipeline P2")prob=5; else if(stage==="Pipeline P1"&&subStage)prob=SUBSTAGE_PROB[subStage];
-    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,aiTasks:[],meetings:[],createdAtISO:now,updatedAtISO:now};
+    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,salesforce,aiTasks:[],meetings:[],createdAtISO:now,updatedAtISO:now};
   }).filter(Boolean) as ClientRecord[];
 }
 
@@ -130,7 +131,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     id:x.id!,companyName:x.companyName??"",contactName:x.contactName??"",
     stage:(x.stage as Stage)??"Prospecto Pasivo",subStage:x.subStage as SubStage|undefined,
     mwp:typeof x.mwp==="number"?x.mwp:0,closeProbabilityPct:typeof x.closeProbabilityPct==="number"?x.closeProbabilityPct:0,
-    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,
+    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -470,116 +471,101 @@ function ProbChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
-// ─── Monthly Projection Chart (con meta) ──────────────────────────────────────
+// ─── Monthly Projection Chart (con meta y redistribución) ─────────────────────
 function MonthlyChart({clients}:{clients:ClientRecord[]}){
-  // Genera meses mar 2026 a feb 2027 (12 meses desde inicio)
-  const months=useMemo(()=>{
-    const m:string[]=[];
-    for(let i=0;i<12;i++){
-      const d=new Date(2026,2+i,1); // empieza en marzo 2026
-      m.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
-    }
-    return m;
-  },[]);
+  const months=useMemo(()=>{const m:string[]=[];for(let i=0;i<12;i++){const d=new Date(2026,2+i,1);m.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}return m;},[]);
+  const today=new Date();
+  const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
 
   const data=useMemo(()=>{
-    // Pipeline proyectado por mes
-    const byMonth:Record<string,{mwpW:number;clients:Array<{name:string;mwp:number;prob:number}>}>={}; 
-    for(const m of months)byMonth[m]={mwpW:0,clients:[]};
+    const byMonth:Record<string,{mwpW:number;clients:Array<{name:string;mwp:number;prob:number}>;signed:number}>={}; 
+    for(const m of months)byMonth[m]={mwpW:0,clients:[],signed:0};
+
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
     for(const c of pipeline){
       if(!c.subStage||c.subStage==="Contrato firmado")continue;
       const key=closingMonthKey(c.subStage,c.stageDate);
-      if(key&&byMonth[key]){byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100); byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}
+      if(key&&byMonth[key]){byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100);byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}
     }
-
-    // Firmados por mes
     const signed=clients.filter(c=>c.subStage==="Contrato firmado");
-    const signedByMonth:Record<string,number>={};
-    for(const c of signed){
-      const key=c.stageDate?monthKey(c.stageDate):"";
-      if(key&&signedByMonth[key]!==undefined)signedByMonth[key]+=c.mwp;
-      else if(key)signedByMonth[key]=c.mwp;
-    }
+    for(const c of signed){const key=c.stageDate?monthKey(c.stageDate):"";if(key&&byMonth[key])byMonth[key].signed+=c.mwp;}
 
-    // Meta: 6 MWp en 12 meses desde marzo, distribuida linealmente
-    const monthlyGoal=ANNUAL_GOAL_MWP/12;
+    // Meses pasados sin cierre: redistribuir su MWp proyectado a meses futuros del 2026
+    const pastMonths2026=months.filter(m=>m<currentMonthKey&&m.startsWith("2026"));
+    const futureMonths2026=months.filter(m=>m>=currentMonthKey&&m.startsWith("2026"));
+    let redistributed=0;
+    for(const m of pastMonths2026){if(byMonth[m].signed===0)redistributed+=byMonth[m].mwpW;}
+    const extraPerMonth=futureMonths2026.length>0?redistributed/futureMonths2026.length:0;
+
+    // Promedio de cierre mensual = total proyectado 2026 / meses restantes
+    const total2026=months.filter(m=>m.startsWith("2026")).reduce((s,m)=>s+byMonth[m].mwpW,0);
+    const avgMonthly=futureMonths2026.length>0?total2026/futureMonths2026.length:0;
 
     let acc=0;
     return months.map(m=>{
-      acc+=byMonth[m].mwpW;
-      return {key:m,label:monthLabel(m),mwpW:byMonth[m].mwpW,clients:byMonth[m].clients,acc,goal:monthlyGoal,signed:signedByMonth[m]||0};
+      const isPast=m<currentMonthKey;
+      const isFuture2026=m>=currentMonthKey&&m.startsWith("2026");
+      const base=byMonth[m].mwpW;
+      const display=isFuture2026?base+extraPerMonth:base;
+      acc+=display;
+      return {key:m,label:monthLabel(m),mwpW:display,baseW:base,clients:byMonth[m].clients,acc,signed:byMonth[m].signed,avgMonthly:isFuture2026?avgMonthly+extraPerMonth:0,isPast,isFuture2026};
     });
-  },[clients,months]);
+  },[clients,months,currentMonthKey]);
 
-  const maxMwp=Math.max(...data.map(d=>Math.max(d.mwpW,d.goal)),0.01);
-  const totalGoal=ANNUAL_GOAL_MWP;
-  const totalProjected=data.reduce((s,d)=>s+d.mwpW,0);
+  const maxMwp=Math.max(...data.map(d=>Math.max(d.mwpW,d.avgMonthly,ANNUAL_GOAL_MWP/12)),0.1);
   const totalSigned=data.reduce((s,d)=>s+d.signed,0);
+  const totalProjected=data.reduce((s,d)=>s+d.mwpW,0);
+  const yTicks=[0,maxMwp*0.25,maxMwp*0.5,maxMwp*0.75,maxMwp].map(v=>Math.round(v*10)/10);
+  const CHART_H=130;
 
   return(
     <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem",flex:1}}>
       <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Proyección de cierres vs Meta</div>
-      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Mar 2026 — Feb 2027 · Barra = proyección, línea = meta mensual (0.5 MWp)</div>
-
-      {/* Mini KPIs */}
+      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Mar 2026 — Feb 2027 · Barra = proyectado (redistribuido), línea = promedio necesario</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"1rem"}}>
-        {[
-          {l:"Meta anual",v:`${totalGoal} MWp`,c:D.ink},
-          {l:"Proyectado",v:`${totalProjected.toFixed(2)} MWp`,c:totalProjected>=totalGoal?"#22c55e":D.accent},
-          {l:"Firmado",v:`${totalSigned.toFixed(2)} MWp`,c:"#22c55e"},
-        ].map((k,i)=>(
+        {[{l:"Meta anual",v:`${ANNUAL_GOAL_MWP} MWp`,c:D.ink},{l:"Proyectado",v:`${totalProjected.toFixed(2)} MWp`,c:totalProjected>=ANNUAL_GOAL_MWP?"#22c55e":D.accent},{l:"Firmado",v:`${totalSigned.toFixed(2)} MWp`,c:"#22c55e"}].map((k,i)=>(
           <div key={i} style={{background:D.bg,borderRadius:"8px",padding:"8px 10px"}}>
             <div style={{fontSize:"9px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>{k.l}</div>
             <div style={{fontSize:"14px",fontWeight:700,color:k.c}}>{k.v}</div>
           </div>
         ))}
       </div>
-
-      <div style={{overflowX:"auto"}}>
-        <div style={{display:"flex",gap:"6px",alignItems:"flex-end",minWidth:"600px",height:"120px",paddingBottom:"4px",position:"relative"}}>
-          {data.map(d=>{
-            const barH=Math.max((d.mwpW/maxMwp)*100,d.mwpW>0?2:0);
-            const goalH=(d.goal/maxMwp)*100;
-            return(
-              <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"36px",height:"120px",justifyContent:"flex-end",position:"relative"}}>
-                {/* Goal line marker */}
-                <div style={{position:"absolute",bottom:`${goalH}px`,left:0,right:0,height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:2}}/>
-                {/* Bar */}
-                <div style={{width:"70%",height:`${barH}px`,background:d.mwpW>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:`${D.border}`,borderRadius:"4px 4px 0 0",position:"relative",minHeight:d.mwpW>0?2:0}}>
-                  {d.mwpW>0&&<div style={{position:"absolute",bottom:"100%",left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:600,color:D.accent,whiteSpace:"nowrap",marginBottom:"2px"}}>{d.mwpW.toFixed(1)}</div>}
+      <div style={{display:"flex",gap:"8px",overflowX:"auto"}}>
+        {/* Y axis */}
+        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,flexShrink:0,paddingBottom:"4px"}}>
+          {[...yTicks].reverse().map((v,i)=><div key={i} style={{fontSize:"8px",color:D.ink3,textAlign:"right",lineHeight:"1"}}>{v}</div>)}
+        </div>
+        {/* Chart */}
+        <div style={{flex:1,minWidth:"500px"}}>
+          <div style={{display:"flex",gap:"4px",alignItems:"flex-end",height:`${CHART_H}px`,position:"relative"}}>
+            {/* Grid lines */}
+            {yTicks.map((v,i)=>(
+              <div key={i} style={{position:"absolute",left:0,right:0,bottom:`${(v/maxMwp)*CHART_H}px`,height:"1px",background:`${D.border}`,zIndex:0,opacity:0.5}}/>
+            ))}
+            {data.map(d=>{
+              const barH=Math.max((d.mwpW/maxMwp)*CHART_H,d.mwpW>0?2:0);
+              const avgH=d.avgMonthly>0?(d.avgMonthly/maxMwp)*CHART_H:0;
+              return(
+                <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"32px",height:`${CHART_H}px`,justifyContent:"flex-end",position:"relative",zIndex:1}}>
+                  {avgH>0&&<div style={{position:"absolute",bottom:`${avgH}px`,left:0,right:0,height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:3}}/>}
+                  {d.mwpW>0&&!d.isPast&&<div style={{position:"absolute",bottom:`${barH+3}px`,left:"50%",transform:"translateX(-50%)",fontSize:"7px",fontWeight:600,color:D.accent,whiteSpace:"nowrap"}}>{d.mwpW.toFixed(1)}</div>}
+                  <div style={{width:"75%",height:`${barH}px`,background:d.isPast&&d.signed===0?"#E5E7EB":d.mwpW>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:`${D.border}`,borderRadius:"4px 4px 0 0",minHeight:d.mwpW>0?2:0,position:"relative"}}>
+                    {d.signed>0&&<div style={{position:"absolute",top:0,left:0,right:0,bottom:0,background:"#22c55e",borderRadius:"4px 4px 0 0",opacity:0.8}}/>}
+                  </div>
                 </div>
-                {/* Signed indicator */}
-                {d.signed>0&&<div style={{position:"absolute",bottom:`${barH+2}px`,left:"50%",transform:"translateX(-50%)",fontSize:"7px",color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✓{d.signed.toFixed(1)}</div>}
-              </div>
-            );
-          })}
-        </div>
-        {/* Month labels */}
-        <div style={{display:"flex",gap:"6px",minWidth:"600px",marginTop:"4px"}}>
-          {data.map(d=>(
-            <div key={d.key} style={{flex:1,fontSize:"8px",color:D.ink3,textAlign:"center",minWidth:"36px"}}>{d.label}</div>
-          ))}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div style={{display:"flex",gap:"16px",marginTop:"10px",fontSize:"10px",color:D.ink3}}>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Proyectado</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Meta mensual</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{color:"#22c55e",fontWeight:700}}>✓</span> Firmado</span>
-      </div>
-
-      {/* Detail list */}
-      <div style={{marginTop:"10px",paddingTop:"10px",borderTop:`1px solid ${D.border}`,display:"flex",flexDirection:"column",gap:"4px",maxHeight:"120px",overflowY:"auto"}}>
-        {data.filter(d=>d.clients.length>0||d.signed>0).map(d=>(
-          <div key={d.key} style={{display:"flex",gap:"8px",fontSize:"10px"}}>
-            <span style={{fontWeight:600,color:D.ink2,minWidth:"55px"}}>{d.label}</span>
-            <span style={{color:D.ink3,flex:1}}>{d.clients.map(c=>`${c.name} (${c.mwp.toFixed(1)} · ${c.prob}%)`).join(" · ")}</span>
-            <span style={{color:D.accent,fontWeight:600,flexShrink:0}}>{d.mwpW.toFixed(2)}</span>
+              );
+            })}
           </div>
-        ))}
-        {data.every(d=>d.clients.length===0)&&<div style={{fontSize:"11px",color:D.ink3}}>Sin proyectos en pipeline</div>}
+          <div style={{display:"flex",gap:"4px",marginTop:"4px"}}>
+            {data.map(d=><div key={d.key} style={{flex:1,fontSize:"7px",color:d.key===currentMonthKey?D.accent:D.ink3,textAlign:"center",minWidth:"32px",fontWeight:d.key===currentMonthKey?700:400}}>{d.label}</div>)}
+          </div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:"14px",marginTop:"10px",fontSize:"10px",color:D.ink3,flexWrap:"wrap"}}>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Proyectado</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Promedio necesario</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:"#22c55e",borderRadius:"2px",display:"inline-block"}}/> Firmado</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:"#E5E7EB",borderRadius:"2px",display:"inline-block"}}/> Mes pasado sin cierre</span>
       </div>
     </div>
   );
@@ -588,57 +574,96 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
 // ─── Pipeline Generated Chart (nuevo pipeline por mes vs objetivo) ─────────────
 function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
   const months=useMemo(()=>{const m:string[]=[];for(let i=0;i<12;i++){const d=new Date(2026,2+i,1);m.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}return m;},[]);
+  const today=new Date();
+  const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
 
   const data=useMemo(()=>{
-    // Probabilidad promedio ponderada del pipeline actual
+    // Solo P1 y P2 (excluir prospectos y perdidos)
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-    const avgProb=pipeline.length>0?pipeline.reduce((s,c)=>s+c.closeProbabilityPct,0)/pipeline.length:15;
-    // Para cerrar meta/12 MWp por mes con esa probabilidad promedio, necesitás generar:
-    const monthlyGoalMwp=ANNUAL_GOAL_MWP/12;
-    const monthlyPipelineNeeded=avgProb>0?(monthlyGoalMwp/(avgProb/100)):monthlyGoalMwp*5;
 
-    // Pipeline generado por mes (usando createdAtISO)
-    const byMonth:Record<string,{mwp:number;count:number;names:string[]}>={}; 
-    for(const m of months)byMonth[m]={mwp:0,count:0,names:[]};
-    for(const c of clients.filter(c=>c.stage!=="Perdido")){
+    const byMonth:Record<string,{count:number;names:string[]}>={}; 
+    for(const m of months)byMonth[m]={count:0,names:[]};
+
+    // Clientes agregados antes de mayo 2026: dividir entre marzo y abril
+    const cutoff="2026-05";
+    const oldPipeline=pipeline.filter(c=>!c.createdAtISO||monthKey(c.createdAtISO)<cutoff);
+    const newPipeline=pipeline.filter(c=>c.createdAtISO&&monthKey(c.createdAtISO)>=cutoff);
+
+    // Dividir viejos entre mar y abr
+    const half=Math.floor(oldPipeline.length/2);
+    oldPipeline.forEach((c,i)=>{
+      const m=i<half?"2026-03":"2026-04";
+      if(byMonth[m]){byMonth[m].count++;byMonth[m].names.push(c.companyName);}
+    });
+
+    // Nuevos: por mes real
+    for(const c of newPipeline){
       const key=monthKey(c.createdAtISO);
-      if(key&&byMonth[key]){byMonth[key].mwp+=c.mwp;byMonth[key].count++;byMonth[key].names.push(c.companyName);}
+      if(key&&byMonth[key]){byMonth[key].count++;byMonth[key].names.push(c.companyName);}
     }
-    return months.map(m=>({key:m,label:monthLabel(m),...byMonth[m],needed:monthlyPipelineNeeded,avgProb:Math.round(avgProb)}));
-  },[clients,months]);
 
-  const maxMwp=Math.max(...data.map(d=>Math.max(d.mwp,d.needed)),0.01);
+    // Objetivo mensual: para tener el pipeline necesario
+    // Probabilidad promedio ponderada
+    const avgProb=pipeline.length>0?pipeline.reduce((s,c)=>s+c.closeProbabilityPct,0)/pipeline.length:15;
+    const monthlyGoalMwp=ANNUAL_GOAL_MWP/12;
+    // Cuántos proyectos promedio necesitás generar por mes
+    // Asumiendo MWp promedio por proyecto
+    const avgMwpPerProject=pipeline.length>0?pipeline.reduce((s,c)=>s+(c.mwp||0),0)/pipeline.length:1;
+    const monthlyCountNeeded=avgMwpPerProject>0&&avgProb>0?(monthlyGoalMwp/(avgProb/100))/avgMwpPerProject:3;
+
+    return months.map(m=>({
+      key:m,label:monthLabel(m),
+      count:byMonth[m].count,
+      names:byMonth[m].names,
+      needed:monthlyCountNeeded,
+      isCurrent:m===currentMonthKey,
+      isPast:m<currentMonthKey,
+    }));
+  },[clients,months,currentMonthKey]);
+
+  const maxCount=Math.max(...data.map(d=>Math.max(d.count,Math.ceil(d.needed))),1);
+  const yTicks=[0,Math.ceil(maxCount*0.25),Math.ceil(maxCount*0.5),Math.ceil(maxCount*0.75),Math.ceil(maxCount)];
+  const CHART_H=120;
+  const totalPipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").length;
 
   return(
     <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem"}}>
-      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Pipeline nuevo generado vs Objetivo mensual</div>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Pipeline nuevo generado por mes</div>
       <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>
-        Línea = pipeline necesario para cumplir meta · Barra = pipeline agregado · Prob. promedio actual: {data[0]?.avgProb||15}%
+        Solo Pipeline P1 y P2 · Eje Y = nº de proyectos · Línea = objetivo mensual · Total acumulado: {totalPipeline} proyectos
       </div>
-      <div style={{overflowX:"auto"}}>
-        <div style={{display:"flex",gap:"6px",alignItems:"flex-end",minWidth:"600px",height:"120px",paddingBottom:"4px"}}>
-          {data.map(d=>{
-            const barH=Math.max((d.mwp/maxMwp)*100,d.mwp>0?2:0);
-            const lineH=(d.needed/maxMwp)*100;
-            return(
-              <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"36px",height:"120px",justifyContent:"flex-end",position:"relative"}}>
-                <div style={{position:"absolute",bottom:`${lineH}px`,left:0,right:0,height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:2}}/>
-                <div style={{width:"70%",height:`${barH}px`,background:d.mwp>=d.needed?`linear-gradient(180deg,#4ade80,#22c55e)`:`linear-gradient(180deg,${D.accentY},${D.accent})`,borderRadius:"4px 4px 0 0",position:"relative",minHeight:d.mwp>0?2:0}}>
-                  {d.mwp>0&&<div style={{position:"absolute",bottom:"100%",left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:600,color:D.accent,whiteSpace:"nowrap",marginBottom:"2px"}}>{d.mwp.toFixed(1)}</div>}
+      <div style={{display:"flex",gap:"8px",overflowX:"auto"}}>
+        {/* Y axis */}
+        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,flexShrink:0,paddingBottom:"4px"}}>
+          {[...yTicks].reverse().map((v,i)=><div key={i} style={{fontSize:"8px",color:D.ink3,textAlign:"right",lineHeight:"1"}}>{v}</div>)}
+        </div>
+        {/* Chart */}
+        <div style={{flex:1,minWidth:"500px"}}>
+          <div style={{display:"flex",gap:"4px",alignItems:"flex-end",height:`${CHART_H}px`,position:"relative"}}>
+            {/* Grid lines */}
+            {yTicks.map((v,i)=>(
+              <div key={i} style={{position:"absolute",left:0,right:0,bottom:`${(v/maxCount)*CHART_H}px`,height:"1px",background:`${D.border}`,zIndex:0,opacity:0.5}}/>
+            ))}
+            {/* Needed line */}
+            <div style={{position:"absolute",left:0,right:0,bottom:`${(data[0]?.needed/maxCount)*CHART_H}px`,height:"2px",background:"#7C3AED",zIndex:2,borderRadius:"1px"}}/>
+            {data.map(d=>{
+              const barH=Math.max((d.count/maxCount)*CHART_H,d.count>0?3:0);
+              return(
+                <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"32px",height:`${CHART_H}px`,justifyContent:"flex-end",position:"relative",zIndex:1}}>
+                  {d.count>0&&<div style={{position:"absolute",bottom:`${barH+3}px`,left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:700,color:d.count>=d.needed?"#22c55e":D.accent,whiteSpace:"nowrap"}}>{d.count}</div>}
+                  <div style={{width:"75%",height:`${barH}px`,background:d.count>=Math.ceil(d.needed)?`linear-gradient(180deg,#4ade80,#22c55e)`:d.count>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:"4px 4px 0 0",minHeight:d.count>0?3:0,border:d.count===0?`1px dashed ${D.border}`:"none"}}/>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{display:"flex",gap:"6px",minWidth:"600px",marginTop:"4px"}}>
-          {data.map(d=>(
-            <div key={d.key} style={{flex:1,fontSize:"8px",color:D.ink3,textAlign:"center",minWidth:"36px"}}>{d.label}</div>
-          ))}
+              );
+            })}
+          </div>
+          <div style={{display:"flex",gap:"4px",marginTop:"4px"}}>
+            {data.map(d=><div key={d.key} style={{flex:1,fontSize:"7px",color:d.isCurrent?D.accent:D.ink3,textAlign:"center",minWidth:"32px",fontWeight:d.isCurrent?700:400}}>{d.label}</div>)}
+          </div>
         </div>
       </div>
-      <div style={{display:"flex",gap:"16px",marginTop:"10px",fontSize:"10px",color:D.ink3}}>
+      <div style={{display:"flex",gap:"14px",marginTop:"10px",fontSize:"10px",color:D.ink3,flexWrap:"wrap"}}>
         <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Pipeline generado</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Pipeline necesario</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Objetivo mensual</span>
         <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:"#22c55e",borderRadius:"2px",display:"inline-block"}}/> Meta cumplida</span>
       </div>
     </div>
@@ -678,6 +703,7 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
       {client.subStage&&(
         <div style={{marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
           <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
+          {client.salesforce&&<span style={{fontSize:"9px",fontWeight:600,color:"#1D4ED8",background:"#EFF6FF",padding:"1px 6px",borderRadius:"10px",border:"1px solid #BFDBFE"}}>SF ✓</span>}
           {isPresentacion&&client.stageDate&&(
             <span style={{fontSize:"10px",color:D.ink3}}>
               Pres. {formatDateShort(client.stageDate)}{closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
@@ -955,11 +981,14 @@ export default function Home(){
     const pipeline=activeClients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
     const signed=activeClients.filter(c=>c.subStage==="Contrato firmado");
     const p1Active=activeClients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado");
+    const sfPipeline=pipeline.filter(c=>c.salesforce);
     return{
       mwpTotal:pipeline.reduce((s,c)=>s+(c.mwp||0),0),
       totalPipeline:pipeline.length,
       mwpP1:p1Active.reduce((s,c)=>s+(c.mwp||0),0),
       mwpFirmado:signed.reduce((s,c)=>s+(c.mwp||0),0),
+      mwpSalesforce:sfPipeline.reduce((s,c)=>s+(c.mwp||0),0),
+      countSalesforce:sfPipeline.length,
       mwpProb2026:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2026;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
       mwpProb2027:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2027;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
     };
@@ -1004,15 +1033,15 @@ export default function Home(){
           <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px"}}>
               {[
-                {l:"Pipeline total",v:metrics.mwpTotal.toFixed(2),u:"MWp",accent:true},
-                {l:"Clientes P1 + P2",v:metrics.totalPipeline,u:"proyectos"},
+                {l:"Pipeline total CRM",v:metrics.mwpTotal.toFixed(2),u:"MWp",accent:true},
+                {l:"Pipeline Salesforce",v:metrics.mwpSalesforce.toFixed(2),u:`MWp · ${metrics.countSalesforce} proyectos`,sf:true},
                 {l:"MWp Pipeline P1",v:metrics.mwpP1.toFixed(2),u:"MWp activos"},
                 {l:"Probable cierre 2026",v:metrics.mwpProb2026.toFixed(2),u:"MWp pond."},
                 {l:"MWp firmado",v:metrics.mwpFirmado.toFixed(2),u:metrics.mwpFirmado>=ANNUAL_GOAL_MWP?"🎉 Meta cumplida":"cerrados"},
               ].map((m,i)=>(
-                <div key={i} style={{background:D.white,border:`1px solid ${m.accent?`${D.accent}44`:D.border}`,borderRadius:"14px",padding:"1.1rem",borderLeft:m.accent?`3px solid ${D.accent}`:"none"}}>
+                <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean;sf?:boolean}).accent?`${D.accent}44`:(m as {sf?:boolean}).sf?"#BFDBFE":D.border}`,borderRadius:"14px",padding:"1.1rem",borderLeft:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:(m as {sf?:boolean}).sf?"3px solid #1D4ED8":"none"}}>
                   <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>{m.l}</div>
-                  <div style={{fontSize:"22px",fontWeight:700,color:m.accent?D.accent:D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
+                  <div style={{fontSize:"22px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:(m as {sf?:boolean}).sf?"#1D4ED8":D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
                   <div style={{fontSize:"10px",color:D.ink3,marginTop:"2px"}}>{m.u}</div>
                 </div>
               ))}
