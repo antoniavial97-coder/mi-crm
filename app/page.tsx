@@ -472,21 +472,16 @@ function ProbChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
+
 // ─── Monthly Projection Chart (líneas acumuladas) ─────────────────────────────
 function MonthlyChart({clients}:{clients:ClientRecord[]}){
   const today=new Date();
   const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-
-  const months2026=useMemo(()=>{
-    const m:string[]=[];
-    for(let i=2;i<=11;i++)m.push(`2026-${String(i+1).padStart(2,"0")}`);
-    return m;
-  },[]);
+  const months2026=useMemo(()=>{const m:string[]=[];for(let i=2;i<=11;i++)m.push(`2026-${String(i+1).padStart(2,"0")}`);return m;},[]);
 
   const data=useMemo(()=>{
-    const byMonth:Record<string,{firmado:number;altaProb:number;bajaProb:number}>={}; 
+    const byMonth:Record<string,{firmado:number;altaProb:number;bajaProb:number}>={};
     for(const m of months2026)byMonth[m]={firmado:0,altaProb:0,bajaProb:0};
-
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
     for(const c of pipeline){
       if(!c.subStage||c.subStage==="Contrato firmado"){
@@ -500,8 +495,6 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
       if(c.closeProbabilityPct>=25)byMonth[key].altaProb+=mwpW;
       else byMonth[key].bajaProb+=mwpW;
     }
-
-    // Meta mensual = 5 MWp / 10 meses
     const metaMensual=ANNUAL_GOAL_MWP/10;
     let accFirmado=0,accAlta=0,accBaja=0,accMeta=0;
     return months2026.map(m=>{
@@ -509,91 +502,54 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
       accAlta+=byMonth[m].altaProb;
       accBaja+=byMonth[m].bajaProb;
       accMeta+=metaMensual;
-      return {
-        key:m,label:monthLabel(m),
-        firmadoAcum:Math.round(accFirmado*100)/100,
-        proyAcum:Math.round((accFirmado+accAlta+accBaja)*100)/100,
-        metaAcum:Math.round(accMeta*100)/100,
-        isCurrent:m===currentMonthKey,
-        isPast:m<currentMonthKey,
-      };
+      return {key:m,label:monthLabel(m),firmadoAcum:Math.round(accFirmado*100)/100,proyAcum:Math.round((accFirmado+accAlta+accBaja)*100)/100,metaAcum:Math.round(accMeta*100)/100,isCurrent:m===currentMonthKey};
     });
   },[clients,months2026,currentMonthKey]);
 
   const totalFirmado=data[data.length-1]?.firmadoAcum||0;
   const totalProy=data[data.length-1]?.proyAcum||0;
   const maxVal=Math.max(ANNUAL_GOAL_MWP+0.5,...data.map(d=>d.proyAcum));
-  const CHART_H=200;
-  const CHART_W_RATIO=0.88;
-  const yTicks=[0,1,2,3,4,5,Math.ceil(maxVal)].filter((v,i,a)=>a.indexOf(v)===i&&v<=Math.ceil(maxVal));
-  const nMonths=months2026.length;
-
-  // SVG-based chart for precision
-  const pts=(arr:number[],w:number,h:number)=>arr.map((v,i)=>`${(i/(nMonths-1))*w},${h-(v/Math.ceil(maxVal))*h}`).join(" ");
+  const nM=months2026.length;
+  const H=180;
 
   return(
     <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem",flex:1}}>
       <div style={{fontSize:"13px",fontWeight:500,color:"var(--color-text-primary)",marginBottom:"4px"}}>Proyección de cierres 2026 — acumulado vs meta</div>
       <div style={{fontSize:"11px",color:"var(--color-text-secondary)",marginBottom:"14px"}}>Mar — Dic 2026 · MWp acumulado</div>
-
-      {/* KPIs */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"16px"}}>
-        {[
-          {l:"Meta 2026",v:`${ANNUAL_GOAL_MWP} MWp`,color:"#1D4ED8"},
-          {l:"Proyectado",v:`${totalProy.toFixed(1)} MWp`,color:totalProy>=ANNUAL_GOAL_MWP?"#16a34a":"#d97706"},
-          {l:"Firmado",v:`${totalFirmado.toFixed(1)} MWp`,color:"#16a34a"},
-        ].map((k,i)=>(
+        {[{l:"Meta 2026",v:`${ANNUAL_GOAL_MWP} MWp`,c:"#1D4ED8"},{l:"Proyectado",v:`${totalProy.toFixed(1)} MWp`,c:totalProy>=ANNUAL_GOAL_MWP?"#16a34a":"#d97706"},{l:"Firmado",v:`${totalFirmado.toFixed(1)} MWp`,c:"#16a34a"}].map((k,i)=>(
           <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"8px 10px"}}>
             <div style={{fontSize:"9px",color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>{k.l}</div>
-            <div style={{fontSize:"16px",fontWeight:500,color:k.color}}>{k.v}</div>
+            <div style={{fontSize:"16px",fontWeight:500,color:k.c}}>{k.v}</div>
           </div>
         ))}
       </div>
-
-      {/* Chart */}
-      <div style={{display:"flex",gap:"6px"}}>
-        {/* Y axis labels */}
-        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,paddingBottom:"20px",flexShrink:0}}>
-          {[...yTicks].reverse().map((v,i)=>(
-            <div key={i} style={{fontSize:"10px",color:"var(--color-text-secondary)",textAlign:"right",width:"20px",lineHeight:"1"}}>{v}</div>
+      <div style={{width:"100%",overflowX:"auto"}}>
+        <svg viewBox={`0 0 520 ${H+30}`} width="100%" style={{display:"block"}}>
+          {[0,1,2,3,4,5].filter(v=>v<=Math.ceil(maxVal)).map((v,i)=>(
+            <g key={i}>
+              <line x1="30" y1={H-(v/maxVal)*H} x2="510" y2={H-(v/maxVal)*H} stroke="var(--color-border-tertiary)" strokeWidth="0.5"/>
+              <text x="26" y={H-(v/maxVal)*H+4} textAnchor="end" fontSize="9" fill="var(--color-text-secondary)">{v}</text>
+            </g>
           ))}
-        </div>
-        {/* SVG chart */}
-        <div style={{flex:1,position:"relative"}}>
-          <svg width="100%" height={CHART_H} viewBox={`0 0 500 ${CHART_H}`} preserveAspectRatio="none" style={{overflow:"visible"}}>
-            {/* Grid lines */}
-            {yTicks.map((v,i)=>(
-              <line key={i} x1="0" y1={CHART_H-20-(v/Math.ceil(maxVal))*(CHART_H-20)} x2="500" y2={CHART_H-20-(v/Math.ceil(maxVal))*(CHART_H-20)} stroke="var(--color-border-tertiary)" strokeWidth="0.5"/>
-            ))}
-            {/* Current month marker */}
-            {data.map((d,i)=>d.isCurrent?(
-              <line key="cur" x1={(i/(nMonths-1))*500} y1="0" x2={(i/(nMonths-1))*500} y2={CHART_H-20} stroke="var(--color-border-secondary)" strokeWidth="1" strokeDasharray="4,3"/>
-            ):null)}
-            {/* Meta line (azul) */}
-            <polyline points={data.map((d,i)=>`${(i/(nMonths-1))*500},${(CHART_H-20)-(d.metaAcum/Math.ceil(maxVal))*(CHART_H-20)}`).join(" ")} fill="none" stroke="#1D4ED8" strokeWidth="2"/>
-            {data.map((d,i)=>(
-              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.metaAcum/Math.ceil(maxVal))*(CHART_H-20)} r="3" fill="#1D4ED8"/>
-            ))}
-            {/* Proyectado (naranja punteado) */}
-            <polyline points={data.filter(d=>!d.isPast||d.firmadoAcum>0).map((d,_,arr)=>{const idx=data.indexOf(d);return `${(idx/(nMonths-1))*500},${(CHART_H-20)-(d.proyAcum/Math.ceil(maxVal))*(CHART_H-20)}`;}).join(" ")} fill="none" stroke="#d97706" strokeWidth="2" strokeDasharray="6,3"/>
-            {data.map((d,i)=>(
-              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.proyAcum/Math.ceil(maxVal))*(CHART_H-20)} r="2.5" fill="#d97706"/>
-            ))}
-            {/* Firmado (verde sólido) */}
-            <polyline points={data.map((d,i)=>`${(i/(nMonths-1))*500},${(CHART_H-20)-(d.firmadoAcum/Math.ceil(maxVal))*(CHART_H-20)}`).join(" ")} fill="none" stroke="#16a34a" strokeWidth="2.5"/>
-            {data.map((d,i)=>d.firmadoAcum>0?(
-              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.firmadoAcum/Math.ceil(maxVal))*(CHART_H-20)} r="4" fill="#16a34a"/>
-            ):null)}
-            {/* Month labels */}
-            {data.map((d,i)=>(
-              <text key={i} x={(i/(nMonths-1))*500} y={CHART_H-4} textAnchor="middle" fontSize="9" fill={d.isCurrent?"#E8500A":"var(--color-text-secondary)"} fontWeight={d.isCurrent?500:400}>{d.label}</text>
-            ))}
-          </svg>
-        </div>
+          {data.map((d,i)=>{
+            const x=30+(i/(nM-1))*480;
+            return(
+              <g key={i}>
+                {d.isCurrent&&<line x1={x} y1={0} x2={x} y2={H} stroke="var(--color-border-secondary)" strokeWidth="1" strokeDasharray="4,3"/>}
+                <text x={x} y={H+20} textAnchor="middle" fontSize="9" fill={d.isCurrent?"#E8500A":"var(--color-text-secondary)"} fontWeight={d.isCurrent?"500":"400"}>{d.label}</text>
+              </g>
+            );
+          })}
+          <polyline points={data.map((d,i)=>`${30+(i/(nM-1))*480},${H-(d.metaAcum/maxVal)*H}`).join(" ")} fill="none" stroke="#1D4ED8" strokeWidth="2"/>
+          {data.map((d,i)=><circle key={i} cx={30+(i/(nM-1))*480} cy={H-(d.metaAcum/maxVal)*H} r="3" fill="#1D4ED8"/>)}
+          <polyline points={data.map((d,i)=>`${30+(i/(nM-1))*480},${H-(d.proyAcum/maxVal)*H}`).join(" ")} fill="none" stroke="#d97706" strokeWidth="2" strokeDasharray="6,3"/>
+          {data.map((d,i)=><circle key={i} cx={30+(i/(nM-1))*480} cy={H-(d.proyAcum/maxVal)*H} r="2.5" fill="#d97706"/>)}
+          <polyline points={data.map((d,i)=>`${30+(i/(nM-1))*480},${H-(d.firmadoAcum/maxVal)*H}`).join(" ")} fill="none" stroke="#16a34a" strokeWidth="2.5"/>
+          {data.map((d,i)=>d.firmadoAcum>0?<circle key={i} cx={30+(i/(nM-1))*480} cy={H-(d.firmadoAcum/maxVal)*H} r="4" fill="#16a34a"/>:null)}
+        </svg>
       </div>
-
-      {/* Legend */}
-      <div style={{display:"flex",gap:"14px",marginTop:"12px",fontSize:"11px",color:"var(--color-text-secondary)",flexWrap:"wrap"}}>
+      <div style={{display:"flex",gap:"14px",marginTop:"8px",fontSize:"11px",color:"var(--color-text-secondary)",flexWrap:"wrap"}}>
         <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2px",background:"#1D4ED8",display:"inline-block",borderRadius:"1px"}}/> Meta ({ANNUAL_GOAL_MWP} MWp)</span>
         <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2px",background:"#d97706",display:"inline-block",borderTop:"2px dashed #d97706"}}/> Proyectado</span>
         <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2.5px",background:"#16a34a",display:"inline-block",borderRadius:"1px"}}/> Firmado</span>
@@ -602,95 +558,7 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
-  const today=new Date();
-  const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
 
-  // Solo meses 2026: marzo a diciembre
-  const months2026=useMemo(()=>{
-    const m:string[]=[];
-    for(let i=2;i<=11;i++)m.push(`2026-${String(i+1).padStart(2,"0")}`);
-    return m;
-  },[]);
-
-  const data=useMemo(()=>{
-    const byMonth:Record<string,{mwpW:number;signed:number;clients:Array<{name:string;mwp:number;prob:number}>}>={}; 
-    for(const m of months2026)byMonth[m]={mwpW:0,signed:0,clients:[]};
-
-    const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-    for(const c of pipeline){
-      if(!c.subStage||c.subStage==="Contrato firmado")continue;
-      const key=closingMonthKey(c.subStage,c.stageDate);
-      if(key&&byMonth[key]){
-        byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100);
-        byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});
-      }
-    }
-    const signed=clients.filter(c=>c.subStage==="Contrato firmado");
-    for(const c of signed){
-      const key=c.stageDate?monthKey(c.stageDate):"";
-      if(key&&byMonth[key])byMonth[key].signed+=c.mwp;
-    }
-
-    // Meses pasados sin cierre → redistribuir su proyectado a meses futuros
-    const pastNoClose=months2026.filter(m=>m<currentMonthKey&&byMonth[m].signed===0);
-    const futureMonths=months2026.filter(m=>m>=currentMonthKey);
-    const redistributed=pastNoClose.reduce((s,m)=>s+byMonth[m].mwpW,0);
-    const extraPerFuture=futureMonths.length>0?redistributed/futureMonths.length:0;
-
-    // Meta mensual dinámica = (meta anual - ya firmado) / meses restantes
-    const totalFirmado=Object.values(byMonth).reduce((s,v)=>s+v.signed,0);
-    const remaining=Math.max(ANNUAL_GOAL_MWP-totalFirmado,0);
-    const metaPerMonth=futureMonths.length>0?remaining/futureMonths.length:0;
-
-    return months2026.map(m=>{
-      const isPast=m<currentMonthKey;
-      const isCurrent=m===currentMonthKey;
-      const isFuture=m>currentMonthKey;
-      const baseW=byMonth[m].mwpW;
-      const displayW=isFuture||isCurrent?baseW+extraPerFuture:baseW;
-      return {
-        key:m,label:monthLabel(m),
-        mwpW:displayW,
-        signed:byMonth[m].signed,
-        clients:byMonth[m].clients,
-        meta:isPast?ANNUAL_GOAL_MWP/10:metaPerMonth, // Meta histórica para pasados
-        isPast,isCurrent,isFuture,
-        noClose:isPast&&byMonth[m].signed===0&&baseW>0,
-      };
-    });
-  },[clients,months2026,currentMonthKey]);
-
-  const totalFirmado=data.reduce((s,d)=>s+d.signed,0);
-  const totalProyectado=data.reduce((s,d)=>s+d.mwpW,0);
-  const maxVal=Math.max(...data.map(d=>Math.max(d.mwpW+d.signed,d.meta)),0.1);
-  const CHART_H=140;
-  const yTicks=[0,Math.round(maxVal*0.25*10)/10,Math.round(maxVal*0.5*10)/10,Math.round(maxVal*0.75*10)/10,Math.round(maxVal*10)/10];
-
-  return(
-    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem",flex:1}}>
-      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Proyección de cierres 2026 vs Meta</div>
-      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"12px"}}>Barra naranja = proyectado · Verde = firmado · Línea punteada = meta mensual dinámica</div>
-
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"14px"}}>
-        {[
-          {l:"Meta 2026",v:`${ANNUAL_GOAL_MWP} MWp`},
-          {l:"Proyectado",v:`${totalProyectado.toFixed(1)} MWp`,ok:totalProyectado>=ANNUAL_GOAL_MWP},
-          {l:"Firmado",v:`${totalFirmado.toFixed(1)} MWp`,ok:totalFirmado>0},
-        ].map((k,i)=>(
-          <div key={i} style={{background:D.bg,borderRadius:"8px",padding:"8px 10px"}}>
-            <div style={{fontSize:"9px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>{k.l}</div>
-            <div style={{fontSize:"15px",fontWeight:700,color:(k as {ok?:boolean}).ok?"#22c55e":D.ink}}>{k.v}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Chart */}
-      <div style={{display:"flex",gap:"6px"}}>
-        {/* Y axis */}
-        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,flexShrink:0}}>
-          {[...yTicks].reverse().map((v,i)=><div key={i} style={{fontSize:"8px",color:D.ink3,textAlign:"right",width:"24px"}}>{v}</div>)}
-        </div>
 // ─── Pipeline Generated Chart ─────────────────────────────────────────────────
 function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
   const today=new Date();
