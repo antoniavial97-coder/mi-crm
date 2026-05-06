@@ -16,7 +16,7 @@ type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
   lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
-  aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; createdAtISO: string; updatedAtISO: string;
+  aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; ingressDate?: string; createdAtISO: string; updatedAtISO: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
@@ -79,8 +79,8 @@ function parseClientsCSV(csv:string):ClientRecord[]{
   const lines=csv.trim().split("\n").filter(Boolean); if(lines.length<2)return [];
   let hLine=0; for(let i=0;i<Math.min(5,lines.length);i++){if(parseCSVLine(lines[i]).some(c=>c.trim().length>1)){hLine=i;break;}}
   const hdrs=parseCSVLine(lines[hLine]).map(h=>h.toLowerCase().trim());
-  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"],stagedate:["fecha etapa","fecha_etapa","stagedate","fechaetapa","fecha de etapa"],salesforce:["salesforce"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
-  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes"),stagedate:col("stagedate"),salesforce:col("salesforce")};
+  const col=(name:string)=>{const v:Record<string,string[]>={company:["empresa","company","nombre"],contact:["contacto","contact"],stage:["etapa","stage"],substage:["subetapa","sub-etapa","substage","subestage"],mwp:["kwp","mwp","kw","mw","potencia"],nextaction:["comentario","pendiente","accion","nextaction"],notes:["notas","notes"],stagedate:["fecha etapa","fecha_etapa","stagedate","fechaetapa","fecha de etapa"],salesforce:["salesforce"],ingressdate:["fecha de ingreso al pipeline","fecha ingreso","fecha_ingreso","ingressdate"]}; return hdrs.findIndex(h=>(v[name]??[name]).some(k=>h.includes(k)));};
+  const idx={company:col("company"),contact:col("contact"),stage:col("stage"),substage:col("substage"),mwp:col("mwp"),nextaction:col("nextaction"),notes:col("notes"),stagedate:col("stagedate"),salesforce:col("salesforce"),ingressdate:col("ingressdate")};
   const now=todayISO();
   return lines.slice(hLine+1).map(line=>{
     const cols=parseCSVLine(line);
@@ -92,8 +92,9 @@ function parseClientsCSV(csv:string):ClientRecord[]{
     const mwp=getNum(idx.mwp);
     const stageDate=idx.stagedate>=0?get(idx.stagedate):undefined;
     const salesforce=idx.salesforce>=0?/^s[ií]/i.test(get(idx.salesforce)):false;
+    const ingressDate=idx.ingressdate>=0?get(idx.ingressdate):undefined;
     let prob=0; if(stage==="Pipeline P2")prob=5; else if(stage==="Pipeline P1"&&subStage)prob=SUBSTAGE_PROB[subStage];
-    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,salesforce,aiTasks:[],meetings:[],createdAtISO:now,updatedAtISO:now};
+    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,salesforce,ingressDate:ingressDate||undefined,aiTasks:[],meetings:[],createdAtISO:now,updatedAtISO:now};
   }).filter(Boolean) as ClientRecord[];
 }
 
@@ -131,7 +132,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     id:x.id!,companyName:x.companyName??"",contactName:x.contactName??"",
     stage:(x.stage as Stage)??"Prospecto Pasivo",subStage:x.subStage as SubStage|undefined,
     mwp:typeof x.mwp==="number"?x.mwp:0,closeProbabilityPct:typeof x.closeProbabilityPct==="number"?x.closeProbabilityPct:0,
-    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),
+    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),ingressDate:(x as Record<string,unknown>).ingressDate as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -628,19 +629,25 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
     for(const m of months2026)byMonth[m]={count:0,names:[]};
 
     const cutoff="2026-05";
-    const oldPipeline=pipeline.filter(c=>!c.createdAtISO||monthKey(c.createdAtISO)<cutoff);
-    const newPipeline=pipeline.filter(c=>c.createdAtISO&&monthKey(c.createdAtISO)>=cutoff&&months2026.includes(monthKey(c.createdAtISO)));
+    const oldPipeline=pipeline.filter(c=>!c.ingressDate||monthKey(c.ingressDate)<cutoff);
+    const newPipeline=pipeline.filter(c=>c.ingressDate&&monthKey(c.ingressDate)>=cutoff&&months2026.includes(monthKey(c.ingressDate)));
 
-    // Dividir viejos entre mar y abr
-    const half=Math.ceil(oldPipeline.length/2);
-    oldPipeline.forEach((c,i)=>{
-      const m=i<half?"2026-03":"2026-04";
+    // Para los que tienen fecha real en la columna, usarla directamente
+    // Para los sin fecha (o antes de mayo), dividir entre mar y abr
+    const withDate=pipeline.filter(c=>c.ingressDate&&months2026.includes(monthKey(c.ingressDate)));
+    const withoutDate=pipeline.filter(c=>!c.ingressDate||!months2026.includes(monthKey(c.ingressDate)));
+
+    // Con fecha: ir al mes correcto
+    for(const c of withDate){
+      const key=monthKey(c.ingressDate!);
+      if(byMonth[key]){byMonth[key].count++;byMonth[key].names.push(c.companyName);}
+    }
+    // Sin fecha: dividir entre mar y abr
+    const half2=Math.ceil(withoutDate.length/2);
+    withoutDate.forEach((c,i)=>{
+      const m=i<half2?"2026-03":"2026-04";
       byMonth[m].count++;byMonth[m].names.push(c.companyName);
     });
-    for(const c of newPipeline){
-      const key=monthKey(c.createdAtISO);
-      byMonth[key].count++;byMonth[key].names.push(c.companyName);
-    }
 
     // Objetivo mensual
     const avgProb=pipeline.length>0?pipeline.reduce((s,c)=>s+c.closeProbabilityPct,0)/pipeline.length:15;
