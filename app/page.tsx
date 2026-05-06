@@ -2,24 +2,29 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 
-type Stage = "Prospecto Pasivo" | "Prospecto Activo" | "Pipeline P2" | "Pipeline P1";
+// ─── Types ────────────────────────────────────────────────────────────────────
+type Stage = "Prospecto Pasivo" | "Prospecto Activo" | "Pipeline P2" | "Pipeline P1" | "Perdido";
 type SubStage =
   | "Evaluación preliminar" | "Primera presentación preliminar"
   | "Visita técnica realizada" | "Presentación final"
   | "Contrato en revisión" | "Contrato firmado";
-type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos";
+type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
+type Meeting = { id: string; date: string; type: "reunion"|"llamado"; summary?: string; notes?: string; fromDiio?: boolean; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
   lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
-  aiTasks: ClientTask[]; createdAtISO: string; updatedAtISO: string;
+  aiTasks: ClientTask[]; meetings: Meeting[]; createdAtISO: string; updatedAtISO: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
 
-const LOCAL_STORAGE_KEY = "solar-crm:v6";
+// ─── Constants ────────────────────────────────────────────────────────────────
+const LOCAL_STORAGE_KEY = "solar-crm:v7";
+const ANNUAL_GOAL_MWP = 6;
+const START_MONTH = "2026-03"; // Marzo 2026
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
 const CONTACTS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=652559693&single=true&output=csv";
 const TRANSCRIPTS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=1050795278&single=true&output=csv";
@@ -30,7 +35,6 @@ const SUBSTAGE_PROB: Record<SubStage,number> = {
   "Visita técnica realizada":15,"Presentación final":25,
   "Contrato en revisión":50,"Contrato firmado":100,
 };
-// Meses de cierre estimado por subetapa (si no hay fecha real de presentación)
 const SUBSTAGE_MONTHS: Record<SubStage,number> = {
   "Evaluación preliminar":8,"Primera presentación preliminar":8,
   "Visita técnica realizada":7,"Presentación final":5,
@@ -40,12 +44,13 @@ const P1_SUBSTAGE_ORDER: SubStage[] = [
   "Contrato en revisión","Presentación final","Visita técnica realizada",
   "Primera presentación preliminar","Evaluación preliminar","Contrato firmado",
 ];
-const STAGES: Stage[] = ["Prospecto Pasivo","Prospecto Activo","Pipeline P2","Pipeline P1"];
+const STAGES: Stage[] = ["Prospecto Pasivo","Prospecto Activo","Pipeline P2","Pipeline P1","Perdido"];
 const D = {
   bg:"#F8F7F4", white:"#FFFFFF", ink:"#1A1A1A", ink2:"#4A4A4A", ink3:"#8A8A8A",
   border:"#E8E6E1", accent:"#E8500A", accentY:"#F5B800",
   signedBg:"#F0FBF4", signedBorder:"#9FD4AF",
   alarmBg:"#FFF5F5", alarmBorder:"#FCA5A5",
+  lostBg:"#FFF5F5", lostBorder:"#FCA5A5",
 };
 const fontStyle = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap'); *{font-family:'DM Sans',sans-serif;}`;
 const iStyle: React.CSSProperties = {width:"100%",padding:"9px 12px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",color:D.ink,outline:"none",boxSizing:"border-box"};
@@ -55,35 +60,19 @@ function todayISO(){const d=new Date();return `${d.getFullYear()}-${String(d.get
 function addDays(iso:string,days:number){const d=new Date(iso);d.setDate(d.getDate()+days);return d.toISOString().slice(0,10);}
 function isPast(iso:string){return new Date(iso)<new Date();}
 function newId(){if(typeof crypto!=="undefined"&&"randomUUID" in crypto)return (crypto as unknown as {randomUUID:()=>string}).randomUUID();return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;}
-
-// Calcula fecha de cierre estimada.
-// Si es "Presentación final" y hay stageDate, usa stageDate + 5 meses.
-// Si no, usa hoy + SUBSTAGE_MONTHS meses.
-function closingDate(subStage:SubStage|undefined, stageDate?:string):Date|null{
+function closingDate(subStage:SubStage|undefined,stageDate?:string):Date|null{
   if(!subStage||subStage==="Contrato firmado")return null;
-  if(subStage==="Presentación final"&&stageDate){
-    const base=new Date(stageDate);
-    if(!isNaN(base.getTime()))return new Date(base.getFullYear(),base.getMonth()+5,base.getDate());
-  }
-  const months=SUBSTAGE_MONTHS[subStage];
-  const today=new Date();
-  return new Date(today.getFullYear(),today.getMonth()+months,today.getDate());
+  if(subStage==="Presentación final"&&stageDate){const base=new Date(stageDate);if(!isNaN(base.getTime()))return new Date(base.getFullYear(),base.getMonth()+5,base.getDate());}
+  const months=SUBSTAGE_MONTHS[subStage];const today=new Date();return new Date(today.getFullYear(),today.getMonth()+months,today.getDate());
 }
-function closingMonthKey(subStage:SubStage|undefined, stageDate?:string):string|null{
-  const d=closingDate(subStage,stageDate);
-  if(!d)return null;
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-}
+function closingMonthKey(subStage:SubStage|undefined,stageDate?:string):string|null{const d=closingDate(subStage,stageDate);if(!d)return null;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
 function monthLabel(key:string){const [y,m]=key.split("-");const names=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];return `${names[parseInt(m)-1]} ${y}`;}
-function formatDateShort(iso:string):string{
-  if(!iso)return "";
-  const d=new Date(iso);if(isNaN(d.getTime()))return iso;
-  return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
-}
+function formatDateShort(iso:string):string{if(!iso)return "";const d=new Date(iso);if(isNaN(d.getTime()))return iso;return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;}
+function monthKey(iso:string):string{if(!iso)return "";const d=new Date(iso);if(isNaN(d.getTime()))return "";return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
 
 // ─── CSV Parsers ──────────────────────────────────────────────────────────────
 function parseCSVLine(line:string):string[]{const r:string[]=[]; let c="",q=false; for(let i=0;i<line.length;i++){const ch=line[i]; if(ch==='"'){if(q&&line[i+1]==='"'){c+='"';i++;}else q=!q;}else if(ch===','&&!q){r.push(c.trim());c="";}else c+=ch;}r.push(c.trim());return r;}
-function normalizeStage(raw:string):Stage{const s=raw.toLowerCase().trim(); if(s.includes("pipeline 1")||s.includes("pipeline p1")||s==="p1")return "Pipeline P1"; if(s.includes("pipeline 2")||s.includes("pipeline p2")||s==="p2")return "Pipeline P2"; if(s.includes("prospecto activo"))return "Prospecto Activo"; if(s.includes("prospecto pasivo"))return "Prospecto Pasivo"; if(s.includes("pipeline"))return "Pipeline P1"; return "Prospecto Pasivo";}
+function normalizeStage(raw:string):Stage{const s=raw.toLowerCase().trim(); if(s.includes("perdido")||s.includes("lost"))return "Perdido"; if(s.includes("pipeline 1")||s.includes("pipeline p1")||s==="p1")return "Pipeline P1"; if(s.includes("pipeline 2")||s.includes("pipeline p2")||s==="p2")return "Pipeline P2"; if(s.includes("prospecto activo"))return "Prospecto Activo"; if(s.includes("prospecto pasivo"))return "Prospecto Pasivo"; if(s.includes("pipeline"))return "Pipeline P1"; return "Prospecto Pasivo";}
 function normalizeSubStage(raw:string):SubStage|undefined{const s=raw.toLowerCase().trim(); if(!s)return undefined; if(s.includes("evaluación preliminar")||s.includes("evaluacion preliminar"))return "Evaluación preliminar"; if(s.includes("primera presentación")||s.includes("primera presentacion")||s.includes("presentación preliminar")||s.includes("presentacion preliminar"))return "Primera presentación preliminar"; if(s.includes("visita técnica")||s.includes("visita tecnica"))return "Visita técnica realizada"; if(s.includes("presentación final")||s.includes("presentacion final"))return "Presentación final"; if(s.includes("revisión")||s.includes("revision")||s.includes("contrato en"))return "Contrato en revisión"; if(s.includes("firmado")||s.includes("firma"))return "Contrato firmado"; return undefined;}
 
 function parseClientsCSV(csv:string):ClientRecord[]{
@@ -103,7 +92,7 @@ function parseClientsCSV(csv:string):ClientRecord[]{
     const mwp=getNum(idx.mwp);
     const stageDate=idx.stagedate>=0?get(idx.stagedate):undefined;
     let prob=0; if(stage==="Pipeline P2")prob=5; else if(stage==="Pipeline P1"&&subStage)prob=SUBSTAGE_PROB[subStage];
-    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,aiTasks:[],createdAtISO:now,updatedAtISO:now};
+    return {id:newId(),companyName,contactName:get(idx.contact),stage,subStage,mwp,closeProbabilityPct:prob,lastContactISO:"",nextAction:get(idx.nextaction),notes:get(idx.notes),stageDate:stageDate||undefined,aiTasks:[],meetings:[],createdAtISO:now,updatedAtISO:now};
   }).filter(Boolean) as ClientRecord[];
 }
 
@@ -145,18 +134,21 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
+    meetings:Array.isArray((x as Record<string,unknown>).meetings)
+      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado")||"reunion",summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio)}))
+      :[],
     createdAtISO:typeof x.createdAtISO==="string"?x.createdAtISO:todayISO(),
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
   }));}catch{return [];}}
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
-function Modal({open,title,children,onClose}:{open:boolean;title:string;children:React.ReactNode;onClose:()=>void}){
+function Modal({open,title,children,onClose,wide}:{open:boolean;title:string;children:React.ReactNode;onClose:()=>void;wide?:boolean}){
   const ref=useRef<HTMLDivElement|null>(null);
   useEffect(()=>{if(!open)return; const fn=(e:KeyboardEvent)=>{if(e.key==="Escape")onClose();}; window.addEventListener("keydown",fn); return ()=>window.removeEventListener("keydown",fn);},[open,onClose]);
   if(!open)return null;
   return(
     <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.3)",backdropFilter:"blur(4px)",padding:"1rem"}} onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div ref={ref} style={{width:"100%",maxWidth:"640px",background:D.white,borderRadius:"20px",boxShadow:"0 24px 80px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",maxHeight:"90vh",outline:"none"}}>
+      <div ref={ref} style={{width:"100%",maxWidth:wide?"860px":"640px",background:D.white,borderRadius:"20px",boxShadow:"0 24px 80px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",maxHeight:"90vh",outline:"none"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"1.1rem 1.5rem",borderBottom:`1px solid ${D.border}`,flexShrink:0}}>
           <span style={{fontSize:"15px",fontWeight:600,color:D.ink}}>{title}</span>
           <button onClick={onClose} style={{padding:"5px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cerrar</button>
@@ -167,7 +159,7 @@ function Modal({open,title,children,onClose}:{open:boolean;title:string;children
   );
 }
 
-// ─── Contact Popup con botón copiar email ─────────────────────────────────────
+// ─── Copy Button ──────────────────────────────────────────────────────────────
 function CopyButton({text}:{text:string}){
   const [copied,setCopied]=useState(false);
   function copy(){navigator.clipboard.writeText(text).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),1500);});}
@@ -178,6 +170,7 @@ function CopyButton({text}:{text:string}){
   );
 }
 
+// ─── Contact Popup ────────────────────────────────────────────────────────────
 function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[];companyName:string;contactName:string}){
   const [show,setShow]=useState(false);
   const ref=useRef<HTMLDivElement>(null);
@@ -186,26 +179,18 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
   if(!contactName)return <span style={{fontSize:"12px",color:D.ink3}}>—</span>;
   return(
     <div style={{position:"relative",display:"inline-block"}} ref={ref}>
-      <button onClick={()=>setShow(s=>!s)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"12px",color:matches.length?D.accent:D.ink2,fontWeight:matches.length?500:400,padding:0,textDecoration:matches.length?"underline dotted":"none"}}>
-        {contactName}
-      </button>
+      <button onClick={()=>setShow(s=>!s)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"12px",color:matches.length?D.accent:D.ink2,fontWeight:matches.length?500:400,padding:0,textDecoration:matches.length?"underline dotted":"none"}}>{contactName}</button>
       {show&&(
         <div style={{position:"absolute",top:"100%",left:0,zIndex:40,marginTop:"4px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",boxShadow:"0 8px 32px rgba(0,0,0,0.12)",padding:"12px 16px",minWidth:"240px",whiteSpace:"nowrap"}}>
-          {matches.length?(
-            matches.map((m,i)=>(
-              <div key={i} style={{marginBottom:i<matches.length-1?"10px":"0"}}>
-                <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>{m.name||contactName}</div>
-                {m.email&&(
-                  <div style={{fontSize:"11px",color:D.ink2,marginBottom:"2px",display:"flex",alignItems:"center"}}>
-                    ✉ {m.email}<CopyButton text={m.email}/>
-                  </div>
-                )}
-                {m.phone&&<div style={{fontSize:"11px",color:D.ink2}}>📞 {m.phone}</div>}
-                {!m.email&&!m.phone&&<div style={{fontSize:"11px",color:D.ink3}}>Sin datos de contacto aún</div>}
-              </div>
-            ))
-          ):(
-            <div style={{fontSize:"11px",color:D.ink3}}>Sin datos en la hoja de contactos</div>
+          {matches.length?(matches.map((m,i)=>(
+            <div key={i} style={{marginBottom:i<matches.length-1?"10px":"0"}}>
+              <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>{m.name||contactName}</div>
+              {m.email&&<div style={{fontSize:"11px",color:D.ink2,marginBottom:"2px",display:"flex",alignItems:"center"}}>✉ {m.email}<CopyButton text={m.email}/></div>}
+              {m.phone&&<div style={{fontSize:"11px",color:D.ink2}}>📞 {m.phone}</div>}
+              {!m.email&&!m.phone&&<div style={{fontSize:"11px",color:D.ink3}}>Sin datos aún</div>}
+            </div>
+          ))):(
+            <div style={{fontSize:"11px",color:D.ink3}}>Sin datos en hoja de contactos</div>
           )}
         </div>
       )}
@@ -213,46 +198,138 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
   );
 }
 
+// ─── Client Detail Modal (Reuniones + Llamados) ───────────────────────────────
+function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client:ClientRecord;transcripts:TranscriptInfo[];onUpdateMeetings:(meetings:Meeting[])=>void;onClose:()=>void}){
+  const [meetings,setMeetings]=useState<Meeting[]>(()=>{
+    // Merge Diio transcripts as meetings
+    const diioMeetings=transcripts
+      .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
+      .map(t=>({id:`diio-${t.date}-${t.company}`,date:t.date,type:"reunion" as const,summary:undefined,notes:t.transcript,fromDiio:true}));
+    const existing=client.meetings||[];
+    const diioIds=new Set(diioMeetings.map(m=>m.id));
+    return [...existing.filter(m=>!m.fromDiio),...diioMeetings].sort((a,b)=>b.date.localeCompare(a.date));
+  });
+  const [showForm,setShowForm]=useState(false);
+  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado";notes:string}>({date:todayISO(),type:"reunion",notes:""});
+  const [summarizing,setSummarizing]=useState<string|null>(null);
+  const [summaries,setSummaries]=useState<Record<string,string>>({});
+
+  function addMeeting(){
+    if(!newMeeting.notes.trim())return;
+    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,notes:newMeeting.notes,fromDiio:false};
+    const updated=[m,...meetings].sort((a,b)=>b.date.localeCompare(a.date));
+    setMeetings(updated);
+    onUpdateMeetings(updated.filter(x=>!x.fromDiio));
+    setNewMeeting({date:todayISO(),type:"reunion",notes:""});
+    setShowForm(false);
+  }
+
+  function deleteMeeting(id:string){
+    const updated=meetings.filter(m=>m.id!==id);
+    setMeetings(updated);
+    onUpdateMeetings(updated.filter(x=>!x.fromDiio));
+  }
+
+  async function summarize(meeting:Meeting){
+    if(!meeting.notes||summaries[meeting.id])return;
+    setSummarizing(meeting.id);
+    try{
+      const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:client.stage,comment:`Resume en 2-3 líneas qué pasó en esta ${meeting.type}: ${meeting.notes.substring(0,800)}`,transcripts:[]})});
+      const data=await res.json() as {tasks?:string[]};
+      setSummaries(prev=>({...prev,[meeting.id]:data.tasks?.[0]||"Sin resumen disponible"}));
+    }catch{setSummaries(prev=>({...prev,[meeting.id]:"Error al generar resumen"}));}
+    setSummarizing(null);
+  }
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
+        <div style={{fontSize:"13px",color:D.ink3}}>{meetings.length} interacciones registradas</div>
+        <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:D.ink,color:D.white,fontSize:"12px",cursor:"pointer",fontWeight:600}}>
+          + Agregar
+        </button>
+      </div>
+
+      {showForm&&(
+        <div style={{background:D.bg,borderRadius:"12px",padding:"14px",marginBottom:"1rem",display:"flex",flexDirection:"column",gap:"10px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+            <div>
+              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Fecha</div>
+              <input type="date" value={newMeeting.date} onChange={e=>setNewMeeting(p=>({...p,date:e.target.value}))} style={iStyle}/>
+            </div>
+            <div>
+              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Tipo</div>
+              <select value={newMeeting.type} onChange={e=>setNewMeeting(p=>({...p,type:e.target.value as "reunion"|"llamado"}))} style={iStyle}>
+                <option value="reunion">Reunión</option>
+                <option value="llamado">Llamado</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Notas</div>
+            <textarea value={newMeeting.notes} onChange={e=>setNewMeeting(p=>({...p,notes:e.target.value}))} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="¿Qué se habló? ¿Cuáles fueron los acuerdos?"/>
+          </div>
+          <div style={{display:"flex",gap:"8px",justifyContent:"flex-end"}}>
+            <button onClick={()=>setShowForm(false)} style={{padding:"6px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
+            <button onClick={addMeeting} style={{padding:"6px 14px",borderRadius:"8px",border:"none",background:D.accent,color:D.white,fontSize:"12px",cursor:"pointer",fontWeight:600}}>Guardar</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+        {meetings.length===0&&<div style={{textAlign:"center",color:D.ink3,fontSize:"12px",padding:"2rem",border:`1px dashed ${D.border}`,borderRadius:"12px"}}>Sin interacciones registradas todavía</div>}
+        {meetings.map(m=>(
+          <div key={m.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px",border:`1px solid ${D.border}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
+              <span style={{fontSize:"11px",fontWeight:600,color:D.white,background:m.type==="reunion"?D.accent:"#7C3AED",padding:"2px 8px",borderRadius:"20px"}}>
+                {m.type==="reunion"?"📅 Reunión":"📞 Llamado"}
+              </span>
+              <span style={{fontSize:"11px",color:D.ink3}}>{formatDateShort(m.date)}</span>
+              {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
+              <div style={{flex:1}}/>
+              {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"2px 6px"}}>×</button>}
+            </div>
+            {m.notes&&(
+              <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.5,marginBottom:"6px",maxHeight:"80px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>
+                {m.notes}
+              </div>
+            )}
+            {summaries[m.id]&&(
+              <div style={{background:D.white,borderRadius:"8px",padding:"8px 10px",fontSize:"11px",color:D.ink2,borderLeft:`2px solid ${D.accent}`,marginTop:"6px"}}>
+                <span style={{fontWeight:600,color:D.accent,marginRight:"4px"}}>Resumen IA:</span>{summaries[m.id]}
+              </div>
+            )}
+            {m.fromDiio&&m.notes&&!summaries[m.id]&&(
+              <button onClick={()=>summarize(m)} disabled={summarizing===m.id} style={{marginTop:"4px",padding:"3px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>
+                {summarizing===m.id?"Resumiendo…":"✦ Resumir con IA"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── AI Pendientes Panel ──────────────────────────────────────────────────────
-// Genera tareas para TODOS los clientes que tienen comentario O transcripciones
 function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
   const [open,setOpen]=useState(false);
   const [loading,setLoading]=useState(false);
   const [generated,setGenerated]=useState(false);
   const [localTasks,setLocalTasks]=useState<Record<string,ClientTask[]>>({});
-
-  // Clientes con comentario O con transcripciones en Hoja 3
-  const clientsToProcess=useMemo(()=>{
-    const companiesWithTranscripts=new Set(transcripts.map(t=>t.company.toLowerCase()));
-    return clients.filter(c=>c.nextAction?.trim()||companiesWithTranscripts.has(c.companyName.toLowerCase()));
-  },[clients,transcripts]);
+  const companiesWithTranscripts=useMemo(()=>new Set(transcripts.map(t=>t.company.toLowerCase())),[transcripts]);
+  const clientsToProcess=useMemo(()=>clients.filter(c=>c.nextAction?.trim()||companiesWithTranscripts.has(c.companyName.toLowerCase())),[clients,companiesWithTranscripts,transcripts]);
 
   async function generar(){
     if(!clientsToProcess.length)return; setLoading(true);setGenerated(false);
     const result:Record<string,ClientTask[]>={};
     for(const client of clientsToProcess){
-      const clientTranscripts=transcripts
-        .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
-        .sort((a,b)=>a.date>b.date?-1:1)
-        .slice(0,3)
-        .map(t=>`[${t.date}] ${t.transcript}`);
+      const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).sort((a,b)=>a.date>b.date?-1:1).slice(0,3).map(t=>`[${t.date}] ${t.transcript}`);
       try{
-        const res=await fetch("/api/generate-actions",{
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            company:client.companyName,
-            stage:`${client.stage}${client.subStage?` · ${client.subStage}`:""}`,
-            comment:client.nextAction||"(sin comentario anotado)",
-            transcripts:clientTranscripts
-          })
-        });
+        const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:`${client.stage}${client.subStage?` · ${client.subStage}`:""}`,comment:client.nextAction||"(sin comentario anotado)",transcripts:clientTranscripts})});
         const data=await res.json() as {tasks?:string[]};
         result[client.id]=(data.tasks||[]).map((t:string)=>({id:newId(),text:t,done:false}));
-      }catch{
-        if(client.nextAction)result[client.id]=[{id:newId(),text:client.nextAction,done:false}];
-        else result[client.id]=[];
-      }
+      }catch{result[client.id]=client.nextAction?[{id:newId(),text:client.nextAction,done:false}]:[];}
     }
     setLocalTasks(result);setLoading(false);setGenerated(true);
   }
@@ -270,34 +347,10 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
       return {...prev,[clientId]:tasks};
     });
   }
+  function dismissFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,dismissed:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
+  function completeFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,done:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
 
-  function dismissFollowUp(clientId:string,taskId:string){
-    setLocalTasks(prev=>{
-      const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,dismissed:true}:undefined}:t);
-      onUpdateTasks(clientId,tasks);
-      return {...prev,[clientId]:tasks};
-    });
-  }
-
-  function completeFollowUp(clientId:string,taskId:string){
-    setLocalTasks(prev=>{
-      const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,done:true}:undefined}:t);
-      onUpdateTasks(clientId,tasks);
-      return {...prev,[clientId]:tasks};
-    });
-  }
-
-  const alarms=useMemo(()=>{
-    const a:Array<{client:ClientRecord;task:ClientTask;followUp:FollowUp}>=[];
-    for(const client of clients){
-      for(const task of (localTasks[client.id]||client.aiTasks||[])){
-        if(task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&isPast(task.followUp.dueDateISO)){
-          a.push({client,task,followUp:task.followUp});
-        }
-      }
-    }
-    return a;
-  },[clients,localTasks]);
+  const alarms=useMemo(()=>{const a:Array<{client:ClientRecord;task:ClientTask;followUp:FollowUp}>=[];for(const client of clients){for(const task of (localTasks[client.id]||client.aiTasks||[])){if(task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&isPast(task.followUp.dueDateISO)){a.push({client,task,followUp:task.followUp});}}}return a;},[clients,localTasks]);
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
@@ -340,14 +393,14 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
               <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
                 {clientsToProcess.map(client=>{
                   const tasks=localTasks[client.id]||[];
-                  const hasTranscripts=transcripts.some(t=>t.company.toLowerCase()===client.companyName.toLowerCase());
+                  const hasDiio=companiesWithTranscripts.has(client.companyName.toLowerCase());
                   return(
                     <div key={client.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px"}}>
                       <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px"}}>
                         <span style={{width:"6px",height:"6px",borderRadius:"50%",background:D.accent,flexShrink:0,display:"inline-block"}}/>
                         {client.companyName}
                         {client.subStage&&<span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>· {client.subStage}</span>}
-                        {hasTranscripts&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>+ Diio</span>}
+                        {hasDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>+ Diio</span>}
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
                         {tasks.length===0&&<div style={{fontSize:"11px",color:D.ink3}}>Sin tareas generadas</div>}
@@ -417,69 +470,190 @@ function ProbChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
+// ─── Monthly Projection Chart (con meta) ──────────────────────────────────────
 function MonthlyChart({clients}:{clients:ClientRecord[]}){
+  // Genera meses mar 2026 a feb 2027 (12 meses desde inicio)
+  const months=useMemo(()=>{
+    const m:string[]=[];
+    for(let i=0;i<12;i++){
+      const d=new Date(2026,2+i,1); // empieza en marzo 2026
+      m.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+    }
+    return m;
+  },[]);
+
   const data=useMemo(()=>{
-    const months:string[]=[];
-    for(let y=2026;y<=2027;y++){const start=y===2026?4:0; const end=y===2026?11:4; for(let m=start;m<=end;m++){months.push(`${y}-${String(m+1).padStart(2,"0")}`);}}
-    const byMonth:Record<string,{mwp:number;mwpW:number;clients:Array<{name:string;mwp:number;prob:number}>}>={}; for(const m of months)byMonth[m]={mwp:0,mwpW:0,clients:[]};
+    // Pipeline proyectado por mes
+    const byMonth:Record<string,{mwpW:number;clients:Array<{name:string;mwp:number;prob:number}>}>={}; 
+    for(const m of months)byMonth[m]={mwpW:0,clients:[]};
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
     for(const c of pipeline){
       if(!c.subStage||c.subStage==="Contrato firmado")continue;
-      // Usa fecha real de presentación si existe
       const key=closingMonthKey(c.subStage,c.stageDate);
-      if(key&&byMonth[key]){byMonth[key].mwp+=c.mwp; byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100); byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}
+      if(key&&byMonth[key]){byMonth[key].mwpW+=c.mwp*(c.closeProbabilityPct/100); byMonth[key].clients.push({name:c.companyName,mwp:c.mwp,prob:c.closeProbabilityPct});}
     }
-    let acc=0; return months.map(m=>{acc+=byMonth[m].mwpW; return {...byMonth[m],key:m,label:monthLabel(m),acc};});
-  },[clients]);
-  const maxMwp=Math.max(...data.map(d=>d.mwpW),0.01);
+
+    // Firmados por mes
+    const signed=clients.filter(c=>c.subStage==="Contrato firmado");
+    const signedByMonth:Record<string,number>={};
+    for(const c of signed){
+      const key=c.stageDate?monthKey(c.stageDate):"";
+      if(key&&signedByMonth[key]!==undefined)signedByMonth[key]+=c.mwp;
+      else if(key)signedByMonth[key]=c.mwp;
+    }
+
+    // Meta: 6 MWp en 12 meses desde marzo, distribuida linealmente
+    const monthlyGoal=ANNUAL_GOAL_MWP/12;
+
+    let acc=0;
+    return months.map(m=>{
+      acc+=byMonth[m].mwpW;
+      return {key:m,label:monthLabel(m),mwpW:byMonth[m].mwpW,clients:byMonth[m].clients,acc,goal:monthlyGoal,signed:signedByMonth[m]||0};
+    });
+  },[clients,months]);
+
+  const maxMwp=Math.max(...data.map(d=>Math.max(d.mwpW,d.goal)),0.01);
+  const totalGoal=ANNUAL_GOAL_MWP;
+  const totalProjected=data.reduce((s,d)=>s+d.mwpW,0);
+  const totalSigned=data.reduce((s,d)=>s+d.signed,0);
+
   return(
     <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem",flex:1}}>
-      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Proyección de cierres mensuales</div>
-      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1.25rem"}}>Mayo 2026 — Mayo 2027 · MWp ponderado y acumulado</div>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Proyección de cierres vs Meta</div>
+      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Mar 2026 — Feb 2027 · Barra = proyección, línea = meta mensual (0.5 MWp)</div>
+
+      {/* Mini KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"1rem"}}>
+        {[
+          {l:"Meta anual",v:`${totalGoal} MWp`,c:D.ink},
+          {l:"Proyectado",v:`${totalProjected.toFixed(2)} MWp`,c:totalProjected>=totalGoal?"#22c55e":D.accent},
+          {l:"Firmado",v:`${totalSigned.toFixed(2)} MWp`,c:"#22c55e"},
+        ].map((k,i)=>(
+          <div key={i} style={{background:D.bg,borderRadius:"8px",padding:"8px 10px"}}>
+            <div style={{fontSize:"9px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>{k.l}</div>
+            <div style={{fontSize:"14px",fontWeight:700,color:k.c}}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+
       <div style={{overflowX:"auto"}}>
-        <div style={{display:"flex",gap:"8px",alignItems:"flex-end",minWidth:"600px",height:"160px",paddingBottom:"4px"}}>
-          {data.map(d=>(
-            <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:"4px",minWidth:"40px"}}>
-              <div style={{width:"100%",display:"flex",flexDirection:"column",alignItems:"center",gap:"2px",height:"130px",justifyContent:"flex-end"}}>
-                <div style={{width:"100%",position:"relative",height:`${(d.mwpW/maxMwp)*110}px`,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                  <div style={{width:"100%",height:`${(d.mwpW/maxMwp)*110}px`,background:d.mwpW>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:`${D.border}`,borderRadius:"4px 4px 0 0",position:"relative",minHeight:"2px"}}>
-                    {d.clients.length>0&&(
-                      <div style={{position:"absolute",bottom:"100%",left:"50%",transform:"translateX(-50%)",marginBottom:"3px",whiteSpace:"nowrap",fontSize:"9px",fontWeight:600,color:D.accent}}>
-                        {d.mwpW>0?d.mwpW.toFixed(1):""}
-                      </div>
-                    )}
-                  </div>
+        <div style={{display:"flex",gap:"6px",alignItems:"flex-end",minWidth:"600px",height:"120px",paddingBottom:"4px",position:"relative"}}>
+          {data.map(d=>{
+            const barH=Math.max((d.mwpW/maxMwp)*100,d.mwpW>0?2:0);
+            const goalH=(d.goal/maxMwp)*100;
+            return(
+              <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"36px",height:"120px",justifyContent:"flex-end",position:"relative"}}>
+                {/* Goal line marker */}
+                <div style={{position:"absolute",bottom:`${goalH}px`,left:0,right:0,height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:2}}/>
+                {/* Bar */}
+                <div style={{width:"70%",height:`${barH}px`,background:d.mwpW>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:`${D.border}`,borderRadius:"4px 4px 0 0",position:"relative",minHeight:d.mwpW>0?2:0}}>
+                  {d.mwpW>0&&<div style={{position:"absolute",bottom:"100%",left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:600,color:D.accent,whiteSpace:"nowrap",marginBottom:"2px"}}>{d.mwpW.toFixed(1)}</div>}
                 </div>
+                {/* Signed indicator */}
+                {d.signed>0&&<div style={{position:"absolute",bottom:`${barH+2}px`,left:"50%",transform:"translateX(-50%)",fontSize:"7px",color:"#22c55e",fontWeight:700,whiteSpace:"nowrap"}}>✓{d.signed.toFixed(1)}</div>}
               </div>
-              <div style={{fontSize:"9px",color:D.ink3,textAlign:"center",lineHeight:1.2,writingMode:"vertical-lr",transform:"rotate(180deg)",height:"40px"}}>{d.label}</div>
-            </div>
+            );
+          })}
+        </div>
+        {/* Month labels */}
+        <div style={{display:"flex",gap:"6px",minWidth:"600px",marginTop:"4px"}}>
+          {data.map(d=>(
+            <div key={d.key} style={{flex:1,fontSize:"8px",color:D.ink3,textAlign:"center",minWidth:"36px"}}>{d.label}</div>
           ))}
         </div>
       </div>
-      <div style={{marginTop:"1rem",display:"flex",flexDirection:"column",gap:"6px",maxHeight:"180px",overflowY:"auto"}}>
-        {data.filter(d=>d.clients.length>0).map(d=>(
-          <div key={d.key} style={{display:"flex",gap:"8px",fontSize:"11px"}}>
-            <span style={{fontWeight:600,color:D.ink2,minWidth:"60px"}}>{d.label}</span>
-            <span style={{color:D.ink3,flex:1}}>{d.clients.map(c=>`${c.name} (${c.mwp.toFixed(1)} MWp · ${c.prob}%)`).join(" · ")}</span>
+
+      {/* Legend */}
+      <div style={{display:"flex",gap:"16px",marginTop:"10px",fontSize:"10px",color:D.ink3}}>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Proyectado</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Meta mensual</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{color:"#22c55e",fontWeight:700}}>✓</span> Firmado</span>
+      </div>
+
+      {/* Detail list */}
+      <div style={{marginTop:"10px",paddingTop:"10px",borderTop:`1px solid ${D.border}`,display:"flex",flexDirection:"column",gap:"4px",maxHeight:"120px",overflowY:"auto"}}>
+        {data.filter(d=>d.clients.length>0||d.signed>0).map(d=>(
+          <div key={d.key} style={{display:"flex",gap:"8px",fontSize:"10px"}}>
+            <span style={{fontWeight:600,color:D.ink2,minWidth:"55px"}}>{d.label}</span>
+            <span style={{color:D.ink3,flex:1}}>{d.clients.map(c=>`${c.name} (${c.mwp.toFixed(1)} · ${c.prob}%)`).join(" · ")}</span>
             <span style={{color:D.accent,fontWeight:600,flexShrink:0}}>{d.mwpW.toFixed(2)}</span>
           </div>
         ))}
         {data.every(d=>d.clients.length===0)&&<div style={{fontSize:"11px",color:D.ink3}}>Sin proyectos en pipeline</div>}
       </div>
-      <div style={{marginTop:"10px",paddingTop:"10px",borderTop:`1px solid ${D.border}`,display:"flex",justifyContent:"space-between",fontSize:"11px"}}>
-        <span style={{color:D.ink3}}>MWp acumulado al final del período</span>
-        <span style={{fontWeight:700,color:D.ink}}>{data[data.length-1]?.acc.toFixed(2)||"0.00"} MWp</span>
+    </div>
+  );
+}
+
+// ─── Pipeline Generated Chart (nuevo pipeline por mes vs objetivo) ─────────────
+function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
+  const months=useMemo(()=>{const m:string[]=[];for(let i=0;i<12;i++){const d=new Date(2026,2+i,1);m.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}return m;},[]);
+
+  const data=useMemo(()=>{
+    // Probabilidad promedio ponderada del pipeline actual
+    const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
+    const avgProb=pipeline.length>0?pipeline.reduce((s,c)=>s+c.closeProbabilityPct,0)/pipeline.length:15;
+    // Para cerrar meta/12 MWp por mes con esa probabilidad promedio, necesitás generar:
+    const monthlyGoalMwp=ANNUAL_GOAL_MWP/12;
+    const monthlyPipelineNeeded=avgProb>0?(monthlyGoalMwp/(avgProb/100)):monthlyGoalMwp*5;
+
+    // Pipeline generado por mes (usando createdAtISO)
+    const byMonth:Record<string,{mwp:number;count:number;names:string[]}>={}; 
+    for(const m of months)byMonth[m]={mwp:0,count:0,names:[]};
+    for(const c of clients.filter(c=>c.stage!=="Perdido")){
+      const key=monthKey(c.createdAtISO);
+      if(key&&byMonth[key]){byMonth[key].mwp+=c.mwp;byMonth[key].count++;byMonth[key].names.push(c.companyName);}
+    }
+    return months.map(m=>({key:m,label:monthLabel(m),...byMonth[m],needed:monthlyPipelineNeeded,avgProb:Math.round(avgProb)}));
+  },[clients,months]);
+
+  const maxMwp=Math.max(...data.map(d=>Math.max(d.mwp,d.needed)),0.01);
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem"}}>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Pipeline nuevo generado vs Objetivo mensual</div>
+      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>
+        Línea = pipeline necesario para cumplir meta · Barra = pipeline agregado · Prob. promedio actual: {data[0]?.avgProb||15}%
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <div style={{display:"flex",gap:"6px",alignItems:"flex-end",minWidth:"600px",height:"120px",paddingBottom:"4px"}}>
+          {data.map(d=>{
+            const barH=Math.max((d.mwp/maxMwp)*100,d.mwp>0?2:0);
+            const lineH=(d.needed/maxMwp)*100;
+            return(
+              <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",minWidth:"36px",height:"120px",justifyContent:"flex-end",position:"relative"}}>
+                <div style={{position:"absolute",bottom:`${lineH}px`,left:0,right:0,height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:2}}/>
+                <div style={{width:"70%",height:`${barH}px`,background:d.mwp>=d.needed?`linear-gradient(180deg,#4ade80,#22c55e)`:`linear-gradient(180deg,${D.accentY},${D.accent})`,borderRadius:"4px 4px 0 0",position:"relative",minHeight:d.mwp>0?2:0}}>
+                  {d.mwp>0&&<div style={{position:"absolute",bottom:"100%",left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:600,color:D.accent,whiteSpace:"nowrap",marginBottom:"2px"}}>{d.mwp.toFixed(1)}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:"6px",minWidth:"600px",marginTop:"4px"}}>
+          {data.map(d=>(
+            <div key={d.key} style={{flex:1,fontSize:"8px",color:D.ink3,textAlign:"center",minWidth:"36px"}}>{d.label}</div>
+          ))}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:"16px",marginTop:"10px",fontSize:"10px",color:D.ink3}}>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Pipeline generado</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"2px",background:"#7C3AED",display:"inline-block"}}/> Pipeline necesario</span>
+        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"12px",height:"4px",background:"#22c55e",borderRadius:"2px",display:"inline-block"}}/> Meta cumplida</span>
       </div>
     </div>
   );
 }
 
 // ─── Client Card ─────────────────────────────────────────────────────────────
-function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
+function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+  const [showDetail,setShowDetail]=useState(false);
   const isSigned=client.subStage==="Contrato firmado";
   const isPresentacion=client.subStage==="Presentación final";
   const closingD=isPresentacion&&client.stageDate?closingDate(client.subStage,client.stageDate):null;
+  const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
   return(
+    <>
     <div style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"14px",transition:"box-shadow 0.15s"}}
       onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.07)")}
       onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
@@ -487,13 +661,16 @@ function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;conta
         <div style={{minWidth:0}}>
           <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"5px"}}>
             {isSigned&&<span style={{color:"#22c55e",fontSize:"12px"}}>✓</span>}
-            {client.companyName||"Sin empresa"}
+            <button onClick={()=>setShowDetail(true)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:600,color:D.ink,padding:0,textAlign:"left"}}>
+              {client.companyName||"Sin empresa"}
+            </button>
           </div>
           <div style={{fontSize:"11px",color:D.ink3,marginTop:"2px"}}>
             <ContactPopup contacts={contacts} companyName={client.companyName} contactName={client.contactName}/>
           </div>
         </div>
-        <div style={{display:"flex",gap:"4px",flexShrink:0}}>
+        <div style={{display:"flex",gap:"4px",flexShrink:0,alignItems:"flex-start"}}>
+          {meetingCount>0&&<button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver reuniones">📅{meetingCount}</button>}
           <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
           <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
         </div>
@@ -503,8 +680,7 @@ function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;conta
           <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
           {isPresentacion&&client.stageDate&&(
             <span style={{fontSize:"10px",color:D.ink3}}>
-              Pres. {formatDateShort(client.stageDate)}
-              {closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
+              Pres. {formatDateShort(client.stageDate)}{closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
             </span>
           )}
         </div>
@@ -515,10 +691,16 @@ function ClientCard({client,contacts,onEdit,onDelete}:{client:ClientRecord;conta
       </div>
       {client.nextAction&&<div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px",borderLeft:`2px solid ${D.border}`}}><div style={{fontSize:"10px",color:D.ink3,marginBottom:"2px"}}>Comentario</div><div style={{fontSize:"12px",color:D.ink2,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{client.nextAction}</div></div>}
     </div>
+    {showDetail&&(
+      <Modal open={showDetail} title={`${client.companyName} — Reuniones y llamados`} onClose={()=>setShowDetail(false)} wide>
+        <ClientDetailModal client={client} transcripts={transcripts} onUpdateMeetings={(meetings)=>onUpdateMeetings(client.id,meetings)} onClose={()=>setShowDetail(false)}/>
+      </Modal>
+    )}
+    </>
   );
 }
 
-// ─── Prospecto Row (lista simple) ─────────────────────────────────────────────
+// ─── Prospecto Row ─────────────────────────────────────────────────────────────
 function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
   const match=contacts.find(c=>c.company.toLowerCase()===client.companyName.toLowerCase());
   return(
@@ -530,11 +712,7 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
         <div style={{fontSize:"11px",color:D.ink3,display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
           {match?.name&&<span>{match.name}</span>}
           {match?.phone&&<span>📞 {match.phone}</span>}
-          {match?.email&&(
-            <span style={{display:"flex",alignItems:"center",gap:"2px"}}>
-              ✉ {match.email}<CopyButton text={match.email}/>
-            </span>
-          )}
+          {match?.email&&<span style={{display:"flex",alignItems:"center",gap:"2px"}}>✉ {match.email}<CopyButton text={match.email}/></span>}
           {!match&&client.contactName&&<span>{client.contactName}</span>}
         </div>
       </div>
@@ -547,7 +725,7 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
 }
 
 // ─── Tab Views ────────────────────────────────────────────────────────────────
-function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
+function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
   const bySubStage=useMemo(()=>{const m=new Map<SubStage,ClientRecord[]>(); for(const s of P1_SUBSTAGE_ORDER)m.set(s,[]); for(const c of p1){const k=c.subStage??("Evaluación preliminar" as SubStage); m.get(k)?.push(c);} return m;},[p1]);
   const metrics=useMemo(()=>{const signed=p1.filter(c=>c.subStage==="Contrato firmado");const active=p1.filter(c=>c.subStage!=="Contrato firmado");return{active:active.length,signed:signed.length,mwpActive:active.reduce((s,c)=>s+(c.mwp||0),0),mwpSigned:signed.reduce((s,c)=>s+(c.mwp||0),0)};},[p1]);
@@ -574,7 +752,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
                 <div style={{fontSize:"11px",color:D.ink3}}>{items.length} cliente{items.length!==1?"s":""}</div>
                 {!isSigned&&<span style={{marginLeft:"auto",fontSize:"11px",fontWeight:700,color:D.accent,background:`${D.accent}12`,padding:"3px 9px",borderRadius:"20px"}}>{SUBSTAGE_PROB[sub]}%</span>}
               </div>
-              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} onEdit={onEdit} onDelete={onDelete}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
+              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
             </div>
           );
         })}
@@ -583,7 +761,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
   );
 }
 
-function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
+function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
   const p2=clients.filter(c=>c.stage==="Pipeline P2");
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
@@ -597,13 +775,13 @@ function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
       </div>
       <AIPendientesPanel clients={p2} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
-        {p2.length?p2.map(c=><ClientCard key={c.id} client={c} contacts={contacts} onEdit={onEdit} onDelete={onDelete}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes en Pipeline P2</div>)}
+        {p2.length?p2.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes en Pipeline P2</div>)}
       </div>
     </div>
   );
 }
 
-function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
+function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
   const activos=clients.filter(c=>c.stage==="Prospecto Activo");
   const pasivos=clients.filter(c=>c.stage==="Prospecto Pasivo");
   return(
@@ -626,9 +804,52 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
   );
 }
 
+function PerdidosTab({clients}:{clients:ClientRecord[]}){
+  const perdidos=clients.filter(c=>c.stage==="Perdido").sort((a,b)=>b.updatedAtISO.localeCompare(a.updatedAtISO));
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:"10px",marginBottom:"0.5rem"}}>
+        <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"14px",padding:"1rem"}}>
+          <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>Proyectos perdidos</div>
+          <div style={{fontSize:"22px",fontWeight:700,color:"#dc2626",fontFamily:"'DM Serif Display',serif"}}>{perdidos.length}</div>
+        </div>
+        <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"14px",padding:"1rem"}}>
+          <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>MWp no cerrado</div>
+          <div style={{fontSize:"22px",fontWeight:700,color:"#dc2626",fontFamily:"'DM Serif Display',serif"}}>{perdidos.reduce((s,c)=>s+(c.mwp||0),0).toFixed(2)}</div>
+        </div>
+      </div>
+      {perdidos.length===0&&(
+        <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"3rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>
+          Sin proyectos perdidos registrados 🎉
+        </div>
+      )}
+      {perdidos.map(c=>(
+        <div key={c.id} style={{background:D.lostBg,border:`1px solid ${D.lostBorder}`,borderRadius:"14px",padding:"14px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"6px"}}>
+            <div>
+              <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{c.companyName}</div>
+              {c.contactName&&<div style={{fontSize:"11px",color:D.ink3,marginTop:"2px"}}>{c.contactName}</div>}
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:"11px",fontWeight:600,color:"#dc2626"}}>{c.mwp.toFixed(2)} MWp</div>
+              <div style={{fontSize:"10px",color:D.ink3,marginTop:"2px"}}>{c.updatedAtISO}</div>
+            </div>
+          </div>
+          {c.nextAction&&(
+            <div style={{background:D.white,borderRadius:"8px",padding:"8px 10px",fontSize:"12px",color:D.ink2,borderLeft:"2px solid #fca5a5"}}>
+              <div style={{fontSize:"10px",color:"#dc2626",marginBottom:"2px",fontWeight:500}}>Motivo</div>
+              {c.nextAction}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Edit/Create Modal Form ───────────────────────────────────────────────────
 type ClientDraft=Omit<ClientRecord,"id"|"createdAtISO"|"updatedAtISO">;
-const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[]};
+const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[],meetings:[]};
 
 function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtract}:{draft:ClientDraft;setDraft:React.Dispatch<React.SetStateAction<ClientDraft>>;onSave:()=>void;onCancel:()=>void;extractTasksLoading:boolean;onExtract:()=>void}){
   const prob=draft.stage==="Pipeline P2"?5:draft.stage==="Pipeline P1"&&draft.subStage?SUBSTAGE_PROB[draft.subStage]:0;
@@ -651,9 +872,9 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
         <div><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>MWp</div><input inputMode="decimal" value={String(draft.mwp)} onChange={e=>{const n=Number(e.target.value.replace(",",".")); setDraft(d=>({...d,mwp:Number.isFinite(n)?n:0}));}} style={iStyle}/></div>
         <div><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Probabilidad</div><div style={{...iStyle,background:D.bg,color:D.ink3,cursor:"default"}}>{prob?`${prob}%${draft.subStage?` — ${draft.subStage}`:""}`:draft.stage==="Pipeline P2"?"5%":"—"}</div></div>
         {draft.subStage==="Presentación final"&&(
-          <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Fecha presentación final <span style={{color:D.ink3,fontWeight:400}}>(se usa para calcular cierre estimado)</span></div><input type="date" value={draft.stageDate||""} onChange={e=>setDraft(d=>({...d,stageDate:e.target.value||undefined}))} style={iStyle}/></div>
+          <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Fecha presentación final <span style={{color:D.ink3,fontWeight:400}}>(para calcular cierre estimado)</span></div><input type="date" value={draft.stageDate||""} onChange={e=>setDraft(d=>({...d,stageDate:e.target.value||undefined}))} style={iStyle}/></div>
         )}
-        <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Comentario / último movimiento</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder="¿Qué pasó? ¿Qué falta hacer?"/></div>
+        <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>{draft.stage==="Perdido"?"Motivo de pérdida":"Comentario / último movimiento"}</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder={draft.stage==="Perdido"?"¿Qué pasó? ¿Por qué se perdió?":"¿Qué pasó? ¿Qué falta hacer?"}/></div>
         <div style={{gridColumn:"1/-1"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
             <div style={{fontSize:"12px",fontWeight:500,color:D.ink2}}>Notas adicionales</div>
@@ -664,7 +885,7 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:"8px",paddingTop:"1rem",borderTop:`1px solid ${D.border}`}}>
         <button onClick={onCancel} style={{padding:"8px 16px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
-        <button onClick={onSave} style={{padding:"8px 18px",borderRadius:"10px",border:"none",background:D.ink,fontSize:"13px",cursor:"pointer",color:D.white,fontWeight:600}}>Guardar</button>
+        <button onClick={onSave} style={{padding:"8px 18px",borderRadius:"10px",border:"none",background:draft.stage==="Perdido"?"#dc2626":D.ink,fontSize:"13px",cursor:"pointer",color:D.white,fontWeight:600}}>Guardar</button>
       </div>
     </div>
   );
@@ -698,7 +919,7 @@ export default function Home(){
       if(parsed.length>0){
         const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
         const localMap=new Map(local.map(c=>[c.companyName.toLowerCase(),c]));
-        const merged=parsed.map(c=>{const e=localMap.get(c.companyName.toLowerCase()); return e?{...c,id:e.id,aiTasks:e.aiTasks,createdAtISO:e.createdAtISO}:c;});
+        const merged=parsed.map(c=>{const e=localMap.get(c.companyName.toLowerCase()); return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],createdAtISO:e.createdAtISO}:c;});
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
       }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
     }catch{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("error");}
@@ -708,8 +929,9 @@ export default function Home(){
   useEffect(()=>{if(sheetStatus!=="idle")localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));},[clients,sheetStatus]);
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
+  function updateClientMeetings(clientId:string,meetings:Meeting[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
-  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks});setModalOpen(true);}
+  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[]});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
   function saveClient(){
     if(!draft.companyName.trim()){window.alert("Ingresa el nombre de la empresa.");return;}
@@ -727,10 +949,12 @@ export default function Home(){
     catch{window.alert("Error de red.");}finally{setExtractTasksLoading(false);}
   }
 
+  const activeClients=useMemo(()=>clients.filter(c=>c.stage!=="Perdido"),[clients]);
+
   const metrics=useMemo(()=>{
-    const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-    const signed=clients.filter(c=>c.subStage==="Contrato firmado");
-    const p1Active=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado");
+    const pipeline=activeClients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
+    const signed=activeClients.filter(c=>c.subStage==="Contrato firmado");
+    const p1Active=activeClients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado");
     return{
       mwpTotal:pipeline.reduce((s,c)=>s+(c.mwp||0),0),
       totalPipeline:pipeline.length,
@@ -739,9 +963,10 @@ export default function Home(){
       mwpProb2026:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2026;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
       mwpProb2027:pipeline.filter(c=>c.subStage!=="Contrato firmado").filter(c=>{const d=closingDate(c.subStage,c.stageDate);return d&&d.getFullYear()===2027;}).reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0),
     };
-  },[clients]);
+  },[activeClients]);
 
-  const tabs:[Tab,string][]=[["dashboard","Dashboard"],["pipeline1","Pipeline P1"],["pipeline2","Pipeline P2"],["prospectos","Prospectos"]];
+  const perdidosCount=useMemo(()=>clients.filter(c=>c.stage==="Perdido").length,[clients]);
+  const tabs:[Tab,string][]=[["dashboard","Dashboard"],["pipeline1","Pipeline P1"],["pipeline2","Pipeline P2"],["prospectos","Prospectos"],["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ]];
 
   return(
     <div style={{minHeight:"100dvh",background:D.bg}}>
@@ -754,7 +979,7 @@ export default function Home(){
               <div style={{width:"1px",height:"24px",background:D.border}}/>
               <div>
                 <div style={{fontSize:"14px",fontWeight:600,color:D.ink,fontFamily:"'DM Serif Display',serif"}}>CRM de Ventas Antonia Vial</div>
-                <div style={{fontSize:"10px",color:D.ink3,letterSpacing:"0.06em",textTransform:"uppercase"}}>Solarity · Proyectos solares</div>
+                <div style={{fontSize:"10px",color:D.ink3,letterSpacing:"0.06em",textTransform:"uppercase"}}>Solarity · Meta 2026: {ANNUAL_GOAL_MWP} MWp</div>
               </div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
@@ -766,7 +991,7 @@ export default function Home(){
           </div>
           <div style={{display:"flex",gap:"0",borderTop:`1px solid ${D.border}`}}>
             {tabs.map(([tab,label])=>(
-              <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"0.65rem 1.25rem",border:"none",background:"none",cursor:"pointer",fontSize:"13px",fontWeight:activeTab===tab?600:400,color:activeTab===tab?D.accent:D.ink3,borderBottom:activeTab===tab?`2px solid ${D.accent}`:"2px solid transparent",transition:"all 0.15s"}}>
+              <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"0.65rem 1.25rem",border:"none",background:"none",cursor:"pointer",fontSize:"13px",fontWeight:activeTab===tab?600:400,color:activeTab===tab?(tab==="perdidos"?"#dc2626":D.accent):D.ink3,borderBottom:activeTab===tab?`2px solid ${tab==="perdidos"?"#dc2626":D.accent}`:"2px solid transparent",transition:"all 0.15s"}}>
                 {label}
               </button>
             ))}
@@ -783,7 +1008,7 @@ export default function Home(){
                 {l:"Clientes P1 + P2",v:metrics.totalPipeline,u:"proyectos"},
                 {l:"MWp Pipeline P1",v:metrics.mwpP1.toFixed(2),u:"MWp activos"},
                 {l:"Probable cierre 2026",v:metrics.mwpProb2026.toFixed(2),u:"MWp pond."},
-                {l:"MWp firmado",v:metrics.mwpFirmado.toFixed(2),u:"cerrados"},
+                {l:"MWp firmado",v:metrics.mwpFirmado.toFixed(2),u:metrics.mwpFirmado>=ANNUAL_GOAL_MWP?"🎉 Meta cumplida":"cerrados"},
               ].map((m,i)=>(
                 <div key={i} style={{background:D.white,border:`1px solid ${m.accent?`${D.accent}44`:D.border}`,borderRadius:"14px",padding:"1.1rem",borderLeft:m.accent?`3px solid ${D.accent}`:"none"}}>
                   <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>{m.l}</div>
@@ -800,14 +1025,16 @@ export default function Home(){
               </div>
             )}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
-              <ProbChart clients={clients}/>
-              <MonthlyChart clients={clients}/>
+              <ProbChart clients={activeClients}/>
+              <MonthlyChart clients={activeClients}/>
             </div>
+            <PipelineGeneradoChart clients={clients}/>
           </div>
         )}
-        {activeTab==="pipeline1"&&<Pipeline1Tab clients={clients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks}/>}
-        {activeTab==="pipeline2"&&<Pipeline2Tab clients={clients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks}/>}
-        {activeTab==="prospectos"&&<ProspectosTab clients={clients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks}/>}
+        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
+        {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
+        {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
+        {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
       </div>
 
       <Modal open={modalOpen} title={editingId?"Editar cliente":"Agregar cliente"} onClose={()=>setModalOpen(false)}>
