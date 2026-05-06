@@ -625,7 +625,7 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
               return(
                 <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:`${CHART_H}px`,justifyContent:"flex-end",position:"relative",minWidth:"28px",zIndex:1}}>
                   {d.mwp>0&&<div style={{position:"absolute",bottom:`${barH+4}px`,left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:700,color:metCriteria?"#22c55e":D.accent,whiteSpace:"nowrap"}}>{d.mwp.toFixed(1)}</div>}
-                  <div style={{width:"80%",height:`${barH}px`,background:metCriteria?`linear-gradient(180deg,#4ade80,#22c55e)`:d.count>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:"4px 4px 0 0",minHeight:d.mwp>0?4:0}}/>
+                  <div style={{width:"80%",height:`${barH}px`,background:metCriteria?`linear-gradient(180deg,#4ade80,#22c55e)`:d.mwp>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:"4px 4px 0 0",minHeight:d.mwp>0?4:0}}/>
                 </div>
               );
             })}
