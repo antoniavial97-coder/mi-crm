@@ -23,7 +23,7 @@ type TranscriptInfo = { company: string; date: string; transcript: string; };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LOCAL_STORAGE_KEY = "solar-crm:v8";
-const ANNUAL_GOAL_MWP = 6;
+const ANNUAL_GOAL_MWP = 5;
 const START_MONTH = "2026-03"; // Marzo 2026
 const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=0&single=true&output=csv";
 const CONTACTS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQx9xTTA1PLUjIbfcEQa4J8s-vazmF_VGGgDQwP4CEoPI3Dy1oimVkRg3YLeFRvyP04IvY5fgMVci2t/pub?gid=652559693&single=true&output=csv";
@@ -472,8 +472,136 @@ function ProbChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
-// ─── Monthly Projection Chart ─────────────────────────────────────────────────
+// ─── Monthly Projection Chart (líneas acumuladas) ─────────────────────────────
 function MonthlyChart({clients}:{clients:ClientRecord[]}){
+  const today=new Date();
+  const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+
+  const months2026=useMemo(()=>{
+    const m:string[]=[];
+    for(let i=2;i<=11;i++)m.push(`2026-${String(i+1).padStart(2,"0")}`);
+    return m;
+  },[]);
+
+  const data=useMemo(()=>{
+    const byMonth:Record<string,{firmado:number;altaProb:number;bajaProb:number}>={}; 
+    for(const m of months2026)byMonth[m]={firmado:0,altaProb:0,bajaProb:0};
+
+    const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
+    for(const c of pipeline){
+      if(!c.subStage||c.subStage==="Contrato firmado"){
+        const key=c.stageDate?monthKey(c.stageDate):"";
+        if(key&&byMonth[key])byMonth[key].firmado+=c.mwp;
+        continue;
+      }
+      const key=closingMonthKey(c.subStage,c.stageDate);
+      if(!key||!byMonth[key])continue;
+      const mwpW=c.mwp*(c.closeProbabilityPct/100);
+      if(c.closeProbabilityPct>=25)byMonth[key].altaProb+=mwpW;
+      else byMonth[key].bajaProb+=mwpW;
+    }
+
+    // Meta mensual = 5 MWp / 10 meses
+    const metaMensual=ANNUAL_GOAL_MWP/10;
+    let accFirmado=0,accAlta=0,accBaja=0,accMeta=0;
+    return months2026.map(m=>{
+      accFirmado+=byMonth[m].firmado;
+      accAlta+=byMonth[m].altaProb;
+      accBaja+=byMonth[m].bajaProb;
+      accMeta+=metaMensual;
+      return {
+        key:m,label:monthLabel(m),
+        firmadoAcum:Math.round(accFirmado*100)/100,
+        proyAcum:Math.round((accFirmado+accAlta+accBaja)*100)/100,
+        metaAcum:Math.round(accMeta*100)/100,
+        isCurrent:m===currentMonthKey,
+        isPast:m<currentMonthKey,
+      };
+    });
+  },[clients,months2026,currentMonthKey]);
+
+  const totalFirmado=data[data.length-1]?.firmadoAcum||0;
+  const totalProy=data[data.length-1]?.proyAcum||0;
+  const maxVal=Math.max(ANNUAL_GOAL_MWP+0.5,...data.map(d=>d.proyAcum));
+  const CHART_H=200;
+  const CHART_W_RATIO=0.88;
+  const yTicks=[0,1,2,3,4,5,Math.ceil(maxVal)].filter((v,i,a)=>a.indexOf(v)===i&&v<=Math.ceil(maxVal));
+  const nMonths=months2026.length;
+
+  // SVG-based chart for precision
+  const pts=(arr:number[],w:number,h:number)=>arr.map((v,i)=>`${(i/(nMonths-1))*w},${h-(v/Math.ceil(maxVal))*h}`).join(" ");
+
+  return(
+    <div style={{background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",borderRadius:"var(--border-radius-lg)",padding:"1.25rem",flex:1}}>
+      <div style={{fontSize:"13px",fontWeight:500,color:"var(--color-text-primary)",marginBottom:"4px"}}>Proyección de cierres 2026 — acumulado vs meta</div>
+      <div style={{fontSize:"11px",color:"var(--color-text-secondary)",marginBottom:"14px"}}>Mar — Dic 2026 · MWp acumulado</div>
+
+      {/* KPIs */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"8px",marginBottom:"16px"}}>
+        {[
+          {l:"Meta 2026",v:`${ANNUAL_GOAL_MWP} MWp`,color:"#1D4ED8"},
+          {l:"Proyectado",v:`${totalProy.toFixed(1)} MWp`,color:totalProy>=ANNUAL_GOAL_MWP?"#16a34a":"#d97706"},
+          {l:"Firmado",v:`${totalFirmado.toFixed(1)} MWp`,color:"#16a34a"},
+        ].map((k,i)=>(
+          <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:"var(--border-radius-md)",padding:"8px 10px"}}>
+            <div style={{fontSize:"9px",color:"var(--color-text-secondary)",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>{k.l}</div>
+            <div style={{fontSize:"16px",fontWeight:500,color:k.color}}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Chart */}
+      <div style={{display:"flex",gap:"6px"}}>
+        {/* Y axis labels */}
+        <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,paddingBottom:"20px",flexShrink:0}}>
+          {[...yTicks].reverse().map((v,i)=>(
+            <div key={i} style={{fontSize:"10px",color:"var(--color-text-secondary)",textAlign:"right",width:"20px",lineHeight:"1"}}>{v}</div>
+          ))}
+        </div>
+        {/* SVG chart */}
+        <div style={{flex:1,position:"relative"}}>
+          <svg width="100%" height={CHART_H} viewBox={`0 0 500 ${CHART_H}`} preserveAspectRatio="none" style={{overflow:"visible"}}>
+            {/* Grid lines */}
+            {yTicks.map((v,i)=>(
+              <line key={i} x1="0" y1={CHART_H-20-(v/Math.ceil(maxVal))*(CHART_H-20)} x2="500" y2={CHART_H-20-(v/Math.ceil(maxVal))*(CHART_H-20)} stroke="var(--color-border-tertiary)" strokeWidth="0.5"/>
+            ))}
+            {/* Current month marker */}
+            {data.map((d,i)=>d.isCurrent?(
+              <line key="cur" x1={(i/(nMonths-1))*500} y1="0" x2={(i/(nMonths-1))*500} y2={CHART_H-20} stroke="var(--color-border-secondary)" strokeWidth="1" strokeDasharray="4,3"/>
+            ):null)}
+            {/* Meta line (azul) */}
+            <polyline points={data.map((d,i)=>`${(i/(nMonths-1))*500},${(CHART_H-20)-(d.metaAcum/Math.ceil(maxVal))*(CHART_H-20)}`).join(" ")} fill="none" stroke="#1D4ED8" strokeWidth="2"/>
+            {data.map((d,i)=>(
+              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.metaAcum/Math.ceil(maxVal))*(CHART_H-20)} r="3" fill="#1D4ED8"/>
+            ))}
+            {/* Proyectado (naranja punteado) */}
+            <polyline points={data.filter(d=>!d.isPast||d.firmadoAcum>0).map((d,_,arr)=>{const idx=data.indexOf(d);return `${(idx/(nMonths-1))*500},${(CHART_H-20)-(d.proyAcum/Math.ceil(maxVal))*(CHART_H-20)}`;}).join(" ")} fill="none" stroke="#d97706" strokeWidth="2" strokeDasharray="6,3"/>
+            {data.map((d,i)=>(
+              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.proyAcum/Math.ceil(maxVal))*(CHART_H-20)} r="2.5" fill="#d97706"/>
+            ))}
+            {/* Firmado (verde sólido) */}
+            <polyline points={data.map((d,i)=>`${(i/(nMonths-1))*500},${(CHART_H-20)-(d.firmadoAcum/Math.ceil(maxVal))*(CHART_H-20)}`).join(" ")} fill="none" stroke="#16a34a" strokeWidth="2.5"/>
+            {data.map((d,i)=>d.firmadoAcum>0?(
+              <circle key={i} cx={(i/(nMonths-1))*500} cy={(CHART_H-20)-(d.firmadoAcum/Math.ceil(maxVal))*(CHART_H-20)} r="4" fill="#16a34a"/>
+            ):null)}
+            {/* Month labels */}
+            {data.map((d,i)=>(
+              <text key={i} x={(i/(nMonths-1))*500} y={CHART_H-4} textAnchor="middle" fontSize="9" fill={d.isCurrent?"#E8500A":"var(--color-text-secondary)"} fontWeight={d.isCurrent?500:400}>{d.label}</text>
+            ))}
+          </svg>
+        </div>
+      </div>
+
+      {/* Legend */}
+      <div style={{display:"flex",gap:"14px",marginTop:"12px",fontSize:"11px",color:"var(--color-text-secondary)",flexWrap:"wrap"}}>
+        <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2px",background:"#1D4ED8",display:"inline-block",borderRadius:"1px"}}/> Meta ({ANNUAL_GOAL_MWP} MWp)</span>
+        <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2px",background:"#d97706",display:"inline-block",borderTop:"2px dashed #d97706"}}/> Proyectado</span>
+        <span style={{display:"flex",alignItems:"center",gap:"5px"}}><span style={{width:"16px",height:"2.5px",background:"#16a34a",display:"inline-block",borderRadius:"1px"}}/> Firmado</span>
+      </div>
+    </div>
+  );
+}
+
   const today=new Date();
   const currentMonthKey=`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
 
@@ -563,52 +691,6 @@ function MonthlyChart({clients}:{clients:ClientRecord[]}){
         <div style={{display:"flex",flexDirection:"column",justifyContent:"space-between",height:`${CHART_H}px`,flexShrink:0}}>
           {[...yTicks].reverse().map((v,i)=><div key={i} style={{fontSize:"8px",color:D.ink3,textAlign:"right",width:"24px"}}>{v}</div>)}
         </div>
-        {/* Bars */}
-        <div style={{flex:1,position:"relative"}}>
-          {/* Grid lines */}
-          {yTicks.map((v,i)=>(
-            <div key={i} style={{position:"absolute",left:0,right:0,bottom:`${(v/maxVal)*CHART_H}px`,height:"1px",background:D.border,opacity:0.6}}/>
-          ))}
-          <div style={{display:"flex",gap:"4px",alignItems:"flex-end",height:`${CHART_H}px`}}>
-            {data.map(d=>{
-              const signedH=(d.signed/maxVal)*CHART_H;
-              const projH=Math.max((d.mwpW/maxVal)*CHART_H,d.mwpW>0?2:0);
-              const metaH=(d.meta/maxVal)*CHART_H;
-              const total=d.mwpW+d.signed;
-              return(
-                <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:`${CHART_H}px`,justifyContent:"flex-end",position:"relative",minWidth:"28px"}}>
-                  {/* Meta line */}
-                  <div style={{position:"absolute",bottom:`${metaH}px`,left:"5%",right:"5%",height:"2px",background:"#7C3AED",borderRadius:"1px",zIndex:3,borderTop:"2px dashed #7C3AED",opacity:0.8}}/>
-                  {/* Label */}
-                  {total>0&&<div style={{position:"absolute",bottom:`${Math.max(projH+signedH,4)+4}px`,left:"50%",transform:"translateX(-50%)",fontSize:"7px",fontWeight:700,color:d.signed>0?"#22c55e":D.accent,whiteSpace:"nowrap"}}>{total.toFixed(1)}</div>}
-                  {/* Stack: proyectado + firmado */}
-                  <div style={{width:"80%",display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                    {/* Firmado (encima) */}
-                    {d.signed>0&&<div style={{width:"100%",height:`${signedH}px`,background:"#22c55e",borderRadius:projH>0?"0":"4px 4px 0 0",minHeight:2}}/>}
-                    {/* Proyectado */}
-                    <div style={{width:"100%",height:`${projH}px`,background:d.noClose?"#D1D5DB":d.mwpW>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:d.signed>0?"0 0 0 0":"4px 4px 0 0",minHeight:d.mwpW>0?2:0,opacity:d.noClose?0.5:1}}/>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {/* Month labels */}
-          <div style={{display:"flex",gap:"4px",marginTop:"4px"}}>
-            {data.map(d=><div key={d.key} style={{flex:1,fontSize:"7px",color:d.isCurrent?D.accent:D.ink3,textAlign:"center",fontWeight:d.isCurrent?700:400,minWidth:"28px"}}>{d.label}</div>)}
-          </div>
-        </div>
-      </div>
-
-      <div style={{display:"flex",gap:"12px",marginTop:"10px",fontSize:"10px",color:D.ink3,flexWrap:"wrap"}}>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"10px",height:"4px",background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px",display:"inline-block"}}/> Proyectado</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"10px",height:"4px",background:"#22c55e",borderRadius:"2px",display:"inline-block"}}/> Firmado</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"10px",height:"2px",background:"#7C3AED",borderTop:"2px dashed #7C3AED",display:"inline-block"}}/> Meta mensual</span>
-        <span style={{display:"flex",alignItems:"center",gap:"4px"}}><span style={{width:"10px",height:"4px",background:"#D1D5DB",borderRadius:"2px",display:"inline-block"}}/> Mes sin cierre</span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Pipeline Generated Chart ─────────────────────────────────────────────────
 function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
   const today=new Date();
@@ -622,59 +704,37 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
   },[]);
 
   const data=useMemo(()=>{
-    // Solo P1 y P2
     const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-
-    const byMonth:Record<string,{count:number;names:string[]}>={}; 
-    for(const m of months2026)byMonth[m]={count:0,names:[]};
-
-    const cutoff="2026-05";
-    const oldPipeline=pipeline.filter(c=>!c.ingressDate||monthKey(c.ingressDate)<cutoff);
-    const newPipeline=pipeline.filter(c=>c.ingressDate&&monthKey(c.ingressDate)>=cutoff&&months2026.includes(monthKey(c.ingressDate)));
-
-    // Para los que tienen fecha real en la columna, usarla directamente
-    // Para los sin fecha (o antes de mayo), dividir entre mar y abr
+    const byMonth:Record<string,{mwp:number;names:string[]}>={}; 
+    for(const m of months2026)byMonth[m]={mwp:0,names:[]};
     const withDate=pipeline.filter(c=>c.ingressDate&&months2026.includes(monthKey(c.ingressDate)));
     const withoutDate=pipeline.filter(c=>!c.ingressDate||!months2026.includes(monthKey(c.ingressDate)));
-
-    // Con fecha: ir al mes correcto
-    for(const c of withDate){
-      const key=monthKey(c.ingressDate!);
-      if(byMonth[key]){byMonth[key].count++;byMonth[key].names.push(c.companyName);}
-    }
-    // Sin fecha: dividir entre mar y abr
+    for(const c of withDate){const key=monthKey(c.ingressDate!);if(byMonth[key]){byMonth[key].mwp+=c.mwp;byMonth[key].names.push(c.companyName);}}
     const half2=Math.ceil(withoutDate.length/2);
-    withoutDate.forEach((c,i)=>{
-      const m=i<half2?"2026-03":"2026-04";
-      byMonth[m].count++;byMonth[m].names.push(c.companyName);
-    });
-
-    // Objetivo mensual
+    withoutDate.forEach((c,i)=>{const m=i<half2?"2026-03":"2026-04";byMonth[m].mwp+=c.mwp;byMonth[m].names.push(c.companyName);});
     const avgProb=pipeline.length>0?pipeline.reduce((s,c)=>s+c.closeProbabilityPct,0)/pipeline.length:15;
-    const avgMwp=pipeline.length>0?pipeline.reduce((s,c)=>s+(c.mwp||0),0)/pipeline.length:1;
-    const monthlyGoalMwp=ANNUAL_GOAL_MWP/10; // 10 meses (mar-dic)
-    const monthlyCountNeeded=avgMwp>0&&avgProb>0?Math.ceil((monthlyGoalMwp/(avgProb/100))/avgMwp):2;
-
+    const monthlyGoalMwp=ANNUAL_GOAL_MWP/10;
+    const monthlyPipelineNeeded=avgProb>0?(monthlyGoalMwp/(avgProb/100)):monthlyGoalMwp*5;
     return months2026.map(m=>({
       key:m,label:monthLabel(m),
-      count:byMonth[m].count,
+      mwp:Math.round(byMonth[m].mwp*100)/100,
       names:byMonth[m].names,
-      needed:monthlyCountNeeded,
+      needed:Math.round(monthlyPipelineNeeded*100)/100,
       isCurrent:m===currentMonthKey,
       isPast:m<currentMonthKey,
     }));
   },[clients,months2026,currentMonthKey]);
 
-  const maxCount=Math.max(...data.map(d=>Math.max(d.count,d.needed+1)),1);
+  const maxCount=Math.max(...data.map(d=>Math.max(d.mwp,d.needed+0.5)),0.5);
   const CHART_H=120;
-  const yTicks=[0,Math.ceil(maxCount*0.33),Math.ceil(maxCount*0.66),maxCount];
-  const totalPipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").length;
+  const yTicks=[0,Math.round(maxCount*0.33*10)/10,Math.round(maxCount*0.66*10)/10,Math.round(maxCount*10)/10];
+  const totalPipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").reduce((s,c)=>s+(c.mwp||0),0);
 
   return(
     <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem"}}>
       <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Pipeline P1+P2 generado por mes · 2026</div>
       <div style={{fontSize:"11px",color:D.ink3,marginBottom:"12px"}}>
-        Eje Y = nº proyectos · Línea punteada = objetivo mensual · Total acumulado: {totalPipeline} proyectos
+        Eje Y = MWp · Línea punteada = pipeline mensual necesario · Total acumulado: {totalPipeline.toFixed(1)} MWp
       </div>
       <div style={{display:"flex",gap:"6px"}}>
         {/* Y axis */}
@@ -692,12 +752,12 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
           </div>
           <div style={{display:"flex",gap:"4px",alignItems:"flex-end",height:`${CHART_H}px`}}>
             {data.map(d=>{
-              const barH=Math.max((d.count/maxCount)*CHART_H,d.count>0?4:0);
-              const metCriteria=d.count>=d.needed;
+              const barH=Math.max((d.mwp/maxCount)*CHART_H,d.mwp>0?4:0);
+              const metCriteria=d.mwp>=d.needed;
               return(
                 <div key={d.key} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",height:`${CHART_H}px`,justifyContent:"flex-end",position:"relative",minWidth:"28px",zIndex:1}}>
-                  {d.count>0&&<div style={{position:"absolute",bottom:`${barH+4}px`,left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:700,color:metCriteria?"#22c55e":D.accent,whiteSpace:"nowrap"}}>{d.count}</div>}
-                  <div style={{width:"80%",height:`${barH}px`,background:metCriteria?`linear-gradient(180deg,#4ade80,#22c55e)`:d.count>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:"4px 4px 0 0",minHeight:d.count>0?4:0}}/>
+                  {d.mwp>0&&<div style={{position:"absolute",bottom:`${barH+4}px`,left:"50%",transform:"translateX(-50%)",fontSize:"8px",fontWeight:700,color:metCriteria?"#22c55e":D.accent,whiteSpace:"nowrap"}}>{d.mwp.toFixed(1)}</div>}
+                  <div style={{width:"80%",height:`${barH}px`,background:metCriteria?`linear-gradient(180deg,#4ade80,#22c55e)`:d.count>0?`linear-gradient(180deg,${D.accentY},${D.accent})`:"transparent",borderRadius:"4px 4px 0 0",minHeight:d.mwp>0?4:0}}/>
                 </div>
               );
             })}
