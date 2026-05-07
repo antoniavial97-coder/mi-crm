@@ -313,6 +313,69 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   );
 }
 
+// ─── Sin Contacto Alert ──────────────────────────────────────────────────────
+const DIAS_ALERTA = 14;
+
+function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
+  return useMemo(()=>{
+    const p1=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado");
+    const hoy=new Date();
+    return p1.map(c=>{
+      // Última actividad: stageDate, reuniones, transcripciones
+      const fechas:Date[]=[];
+      if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
+      for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
+      const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
+      for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
+      if(fechas.length===0)return {client:c,dias:999,ultimaActividad:"Sin registro"};
+      const ultima=new Date(Math.max(...fechas.map(d=>d.getTime())));
+      const dias=Math.floor((hoy.getTime()-ultima.getTime())/(1000*60*60*24));
+      return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
+    }).filter(x=>x.dias>=DIAS_ALERTA).sort((a,b)=>b.dias-a.dias);
+  },[clients,transcripts]);
+}
+
+function SinContactoAlert({clients,transcripts,onEdit}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void}){
+  const [collapsed,setCollapsed]=useState(false);
+  const alertas=useSinContacto(clients,transcripts);
+  if(alertas.length===0)return null;
+  return(
+    <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:"14px",overflow:"hidden"}}>
+      <button onClick={()=>setCollapsed(c=>!c)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <span style={{fontSize:"16px"}}>⏰</span>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:"13px",fontWeight:600,color:"#9A3412"}}>
+              {alertas.length} cliente{alertas.length>1?"s":""} sin contacto hace +{DIAS_ALERTA} días
+            </div>
+            <div style={{fontSize:"11px",color:"#C2410C"}}>Pipeline P1 · Requiere atención</div>
+          </div>
+        </div>
+        <span style={{color:"#C2410C",fontSize:"12px"}}>{collapsed?"▼":"▲"}</span>
+      </button>
+      {!collapsed&&(
+        <div style={{borderTop:"1px solid #FED7AA",padding:"10px 16px",display:"flex",flexDirection:"column",gap:"6px"}}>
+          {alertas.map(({client,dias,ultimaActividad})=>(
+            <div key={client.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"8px 10px",background:"white",borderRadius:"10px",border:"1px solid #FED7AA"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:"12px",fontWeight:600,color:"#1A1A1A"}}>{client.companyName}</div>
+                <div style={{fontSize:"11px",color:"#8A8A8A",marginTop:"1px"}}>
+                  {client.subStage&&<span style={{marginRight:"8px"}}>{client.subStage}</span>}
+                  Última actividad: {ultimaActividad}
+                </div>
+              </div>
+              <div style={{flexShrink:0,textAlign:"right"}}>
+                <div style={{fontSize:"12px",fontWeight:700,color:dias>30?"#dc2626":"#ea580c"}}>{dias} días</div>
+                <button onClick={()=>onEdit(client.id)} style={{fontSize:"10px",padding:"2px 8px",borderRadius:"6px",border:"1px solid #FED7AA",background:"white",cursor:"pointer",color:"#C2410C",marginTop:"2px"}}>Editar</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── AI Pendientes Panel ──────────────────────────────────────────────────────
 function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
   const [open,setOpen]=useState(false);
@@ -739,6 +802,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
           </div>
         ))}
       </div>
+      <SinContactoAlert clients={clients} transcripts={transcripts} onEdit={onEdit}/>
       <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
@@ -1027,6 +1091,7 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <SinContactoAlert clients={activeClients} transcripts={transcripts} onEdit={openEdit}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
