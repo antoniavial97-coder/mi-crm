@@ -531,18 +531,20 @@ type DailyTask = { id: string; text: string; done: boolean; date: string; client
 
 function MiDiaPanel({clients}:{clients:ClientRecord[]}){
   const [open,setOpen]=useState(false);
-  const [tasks,setTasks]=useState<DailyTask[]>(()=>{
-    try{
-      const raw=localStorage.getItem(MI_DIA_KEY);
-      if(!raw)return [];
-      const data=JSON.parse(raw) as DailyTask[];
-      const hoy=todayISO();
-      return data.map(t=>t.done?t:{...t,date:hoy});
-    }catch{return [];}
-  });
+  const [tasks,setTasks]=useState<DailyTask[]>([]);
   const [input,setInput]=useState("");
   const [selectedClient,setSelectedClient]=useState("");
   const hoy=todayISO();
+
+  // Load from localStorage only on client
+  useEffect(()=>{
+    try{
+      const raw=localStorage.getItem(MI_DIA_KEY);
+      if(!raw)return;
+      const data=JSON.parse(raw) as DailyTask[];
+      setTasks(data.map(t=>t.done?t:{...t,date:hoy}));
+    }catch{}
+  },[]);
 
   useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
 
@@ -647,42 +649,6 @@ function MiDiaPanel({clients}:{clients:ClientRecord[]}){
     </div>
   );
 }
-  const [open,setOpen]=useState(false);
-  const [tasks,setTasks]=useState<DailyTask[]>(()=>{
-    try{
-      const raw=localStorage.getItem(MI_DIA_KEY);
-      if(!raw)return [];
-      const data=JSON.parse(raw) as DailyTask[];
-      const hoy=todayISO();
-      // Las no completadas de días anteriores quedan como pendientes de hoy
-      return data.map(t=>t.done?t:{...t,date:hoy});
-    }catch{return [];}
-  });
-  const [input,setInput]=useState("");
-  const hoy=todayISO();
-
-  useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
-
-  function addTask(){
-    const text=input.trim();
-    if(!text)return;
-    setTasks(prev=>[...prev,{id:newId(),text,done:false,date:hoy}]);
-    setInput("");
-  }
-
-  function toggleTask(id:string){
-    setTasks(prev=>prev.map(t=>t.id===id?{...t,done:!t.done}:t));
-  }
-
-  function deleteTask(id:string){
-    setTasks(prev=>prev.filter(t=>t.id!==id));
-  }
-
-  function clearCompleted(){
-    setTasks(prev=>prev.filter(t=>!t.done));
-  }
-
-  const pendientes=tasks.filter(t=>!t.done);
 // ─── Dashboard Charts ─────────────────────────────────────────────────────────
 function ProbChart({clients}:{clients:ClientRecord[]}){
   const data=useMemo(()=>{
