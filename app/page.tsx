@@ -524,6 +524,141 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
   );
 }
 
+// ─── Mi Día Panel ─────────────────────────────────────────────────────────────
+const MI_DIA_KEY = "solar-crm:midia";
+
+type DailyTask = { id: string; text: string; done: boolean; date: string; };
+
+function MiDiaPanel(){
+  const [open,setOpen]=useState(false);
+  const [tasks,setTasks]=useState<DailyTask[]>(()=>{
+    try{
+      const raw=localStorage.getItem(MI_DIA_KEY);
+      if(!raw)return [];
+      const data=JSON.parse(raw) as DailyTask[];
+      const hoy=todayISO();
+      // Las no completadas de días anteriores quedan como pendientes de hoy
+      return data.map(t=>t.done?t:{...t,date:hoy});
+    }catch{return [];}
+  });
+  const [input,setInput]=useState("");
+  const hoy=todayISO();
+
+  useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
+
+  function addTask(){
+    const text=input.trim();
+    if(!text)return;
+    setTasks(prev=>[...prev,{id:newId(),text,done:false,date:hoy}]);
+    setInput("");
+  }
+
+  function toggleTask(id:string){
+    setTasks(prev=>prev.map(t=>t.id===id?{...t,done:!t.done}:t));
+  }
+
+  function deleteTask(id:string){
+    setTasks(prev=>prev.filter(t=>t.id!==id));
+  }
+
+  function clearCompleted(){
+    setTasks(prev=>prev.filter(t=>!t.done));
+  }
+
+  const pendientes=tasks.filter(t=>!t.done);
+  const completadas=tasks.filter(t=>t.done);
+  const deHoyOAntes=tasks.filter(t=>t.date<=hoy);
+  const pendientesDeAyer=pendientes.filter(t=>t.date<hoy);
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,#1D4ED8,#7C3AED)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>📋</div>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Mi día</div>
+            <div style={{fontSize:"11px",color:D.ink3}}>
+              {pendientes.length>0?`${pendientes.length} pendiente${pendientes.length>1?"s":""}`:completadas.length>0?"✓ Todo completado":"Sin tareas para hoy"}
+              {pendientesDeAyer.length>0&&<span style={{color:"#d97706",marginLeft:"6px"}}>· {pendientesDeAyer.length} de ayer</span>}
+            </div>
+          </div>
+        </div>
+        <span style={{color:D.ink3,fontSize:"12px"}}>{open?"▲":"▼"}</span>
+      </button>
+
+      {open&&(
+        <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 16px"}}>
+          {/* Input nueva tarea */}
+          <div style={{display:"flex",gap:"8px",marginBottom:"12px"}}>
+            <input
+              value={input}
+              onChange={e=>setInput(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter")addTask();}}
+              placeholder="Agregar tarea para hoy… (Enter para guardar)"
+              style={{...iStyle,flex:1}}
+            />
+            <button onClick={addTask} disabled={!input.trim()} style={{padding:"9px 14px",borderRadius:"10px",border:"none",background:input.trim()?`linear-gradient(135deg,#1D4ED8,#7C3AED)`:"#E5E7EB",color:input.trim()?"white":"#9CA3AF",fontSize:"12px",cursor:input.trim()?"pointer":"default",fontWeight:600,flexShrink:0}}>
+              + Agregar
+            </button>
+          </div>
+
+          {/* Pendientes de ayer */}
+          {pendientesDeAyer.length>0&&(
+            <div style={{marginBottom:"10px"}}>
+              <div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>
+              {pendientesDeAyer.map(t=>(
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"7px 10px",borderRadius:"8px",background:"#FFFBEB",border:"1px solid #FDE68A",marginBottom:"4px"}}>
+                  <input type="checkbox" checked={false} onChange={()=>toggleTask(t.id)} style={{accentColor:"#d97706",flexShrink:0}}/>
+                  <span style={{flex:1,fontSize:"12px",color:D.ink}}>{t.text}</span>
+                  <span style={{fontSize:"10px",color:"#d97706"}}>{t.date}</span>
+                  <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px"}}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Pendientes de hoy */}
+          {pendientes.filter(t=>t.date===hoy).length>0&&(
+            <div style={{marginBottom:"10px"}}>
+              <div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Hoy</div>
+              {pendientes.filter(t=>t.date===hoy).map(t=>(
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"7px 10px",borderRadius:"8px",background:D.bg,marginBottom:"4px"}}>
+                  <input type="checkbox" checked={false} onChange={()=>toggleTask(t.id)} style={{accentColor:D.accent,flexShrink:0}}/>
+                  <span style={{flex:1,fontSize:"12px",color:D.ink}}>{t.text}</span>
+                  <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px"}}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Completadas */}
+          {completadas.length>0&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                <div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div>
+                <button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer",padding:"0"}}>Limpiar</button>
+              </div>
+              {completadas.map(t=>(
+                <div key={t.id} style={{display:"flex",alignItems:"center",gap:"8px",padding:"7px 10px",borderRadius:"8px",background:"#F0FBF4",marginBottom:"4px",opacity:0.7}}>
+                  <input type="checkbox" checked={true} onChange={()=>toggleTask(t.id)} style={{accentColor:"#16a34a",flexShrink:0}}/>
+                  <span style={{flex:1,fontSize:"12px",color:D.ink3,textDecoration:"line-through"}}>{t.text}</span>
+                  <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px"}}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tasks.length===0&&(
+            <div style={{textAlign:"center",padding:"1.5rem",color:D.ink3,fontSize:"12px"}}>
+              Sin tareas para hoy — agregá lo que querés hacer
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Dashboard Charts ─────────────────────────────────────────────────────────
 function ProbChart({clients}:{clients:ClientRecord[]}){
   const data=useMemo(()=>{
@@ -1344,6 +1479,7 @@ export default function Home(){
               </div>
             )}
             <SinContactoAlert clients={activeClients} transcripts={transcripts} onEdit={openEdit}/>
+            <MiDiaPanel/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
