@@ -346,7 +346,6 @@ function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
     return p1.map(c=>{
       const fechas:Date[]=[];
       if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
-      if(c.updatedAtISO){const d=new Date(c.updatedAtISO);if(!isNaN(d.getTime()))fechas.push(d);}
       for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
       const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
       for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
