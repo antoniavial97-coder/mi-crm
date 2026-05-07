@@ -11,7 +11,7 @@ type SubStage =
 type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
-type Meeting = { id: string; date: string; type: "reunion"|"llamado"; summary?: string; notes?: string; fromDiio?: boolean; };
+type Meeting = { id: string; date: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
@@ -137,7 +137,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
     meetings:Array.isArray((x as Record<string,unknown>).meetings)
-      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado")||"reunion",summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio)}))
+      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado"|"correo")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio)}))
       :[],
     createdAtISO:typeof x.createdAtISO==="string"?x.createdAtISO:todayISO(),
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
@@ -212,17 +212,17 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     return [...existing.filter(m=>!m.fromDiio),...diioMeetings].sort((a,b)=>b.date.localeCompare(a.date));
   });
   const [showForm,setShowForm]=useState(false);
-  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado";notes:string}>({date:todayISO(),type:"reunion",notes:""});
+  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:todayISO(),type:"reunion",subject:"",notes:""});
   const [summarizing,setSummarizing]=useState<string|null>(null);
   const [summaries,setSummaries]=useState<Record<string,string>>({});
 
   function addMeeting(){
-    if(!newMeeting.notes.trim())return;
-    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,notes:newMeeting.notes,fromDiio:false};
+    if(!newMeeting.notes.trim()&&!newMeeting.subject.trim())return;
+    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false};
     const updated=[m,...meetings].sort((a,b)=>b.date.localeCompare(a.date));
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
-    setNewMeeting({date:todayISO(),type:"reunion",notes:""});
+    setNewMeeting({date:todayISO(),type:"reunion",subject:"",notes:""});
     setShowForm(false);
   }
 
@@ -274,15 +274,22 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
             </div>
             <div>
               <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Tipo</div>
-              <select value={newMeeting.type} onChange={e=>setNewMeeting(p=>({...p,type:e.target.value as "reunion"|"llamado"}))} style={iStyle}>
-                <option value="reunion">Reunión</option>
-                <option value="llamado">Llamado</option>
+              <select value={newMeeting.type} onChange={e=>setNewMeeting(p=>({...p,type:e.target.value as "reunion"|"llamado"|"correo"}))} style={iStyle}>
+                <option value="reunion">📅 Reunión</option>
+                <option value="llamado">📞 Llamado</option>
+                <option value="correo">✉ Correo</option>
               </select>
             </div>
           </div>
+          {newMeeting.type==="correo"&&(
+            <div>
+              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Asunto del correo</div>
+              <input value={newMeeting.subject} onChange={e=>setNewMeeting(p=>({...p,subject:e.target.value}))} style={iStyle} placeholder="Ej: Propuesta comercial Agrícola San Osvaldo"/>
+            </div>
+          )}
           <div>
-            <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Notas</div>
-            <textarea value={newMeeting.notes} onChange={e=>setNewMeeting(p=>({...p,notes:e.target.value}))} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="¿Qué se habló? ¿Cuáles fueron los acuerdos?"/>
+            <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>{newMeeting.type==="correo"?"Contenido / resumen del correo":"Notas"}</div>
+            <textarea value={newMeeting.notes} onChange={e=>setNewMeeting(p=>({...p,notes:e.target.value}))} rows={3} style={{...iStyle,resize:"vertical"}} placeholder={newMeeting.type==="correo"?"¿Qué decía el correo? ¿Qué respondiste?":"¿Qué se habló? ¿Cuáles fueron los acuerdos?"}/>
           </div>
           <div style={{display:"flex",gap:"8px",justifyContent:"flex-end"}}>
             <button onClick={()=>setShowForm(false)} style={{padding:"6px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
@@ -296,14 +303,17 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
         {meetings.map(m=>(
           <div key={m.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px",border:`1px solid ${D.border}`}}>
             <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
-              <span style={{fontSize:"11px",fontWeight:600,color:D.white,background:m.type==="reunion"?D.accent:"#7C3AED",padding:"2px 8px",borderRadius:"20px"}}>
-                {m.type==="reunion"?"📅 Reunión":"📞 Llamado"}
+              <span style={{fontSize:"11px",fontWeight:600,color:D.white,background:m.type==="reunion"?D.accent:m.type==="llamado"?"#7C3AED":"#0891b2",padding:"2px 8px",borderRadius:"20px"}}>
+                {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}
               </span>
               <span style={{fontSize:"11px",color:D.ink3}}>{formatDateShort(m.date)}</span>
               {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
               <div style={{flex:1}}/>
               {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"2px 6px"}}>×</button>}
             </div>
+            {m.subject&&(
+              <div style={{fontSize:"12px",fontWeight:500,color:D.ink,marginBottom:"4px"}}>📌 {m.subject}</div>
+            )}
             {m.notes&&(
               <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.5,marginBottom:"6px",maxHeight:"80px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>
                 {m.notes}
