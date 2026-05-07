@@ -525,6 +525,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
 
       {/* Mi día */}
       {!alertOnly&&(
+      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
         <button onClick={()=>setMiDiaOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
           <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
             <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,#1D4ED8,#7C3AED)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>📋</div>
