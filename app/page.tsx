@@ -357,226 +357,68 @@ function getRecentContacts():Record<string,string>{
   }catch{return {};}
 }
 
-function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
-  const [tick,setTick]=useState(0);
-  // Re-check cada vez que cambia el estado global
-  const recentContacts=useMemo(()=>getRecentContacts(),[tick,clients]);
 
-  return {
-    alertas: useMemo(()=>{
-      const p1=clients.filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo");
-      const hoy=new Date();
-      return p1.map(c=>{
-        const fechas:Date[]=[];
-        if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
-        if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
-        // Leer contacto reciente del localStorage
-        if(recentContacts[c.id]){const d=new Date(recentContacts[c.id]);if(!isNaN(d.getTime()))fechas.push(d);}
-        for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
-        const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
-        for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
-        if(fechas.length===0)return {client:c,dias:999,ultimaActividad:"Sin registro"};
-        const ultima=new Date(Math.max(...fechas.map(d=>d.getTime())));
-        const dias=Math.floor((hoy.getTime()-ultima.getTime())/(1000*60*60*24));
-        return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
-      }).filter(x=>x.dias>=DIAS_ALERTA).sort((a,b)=>b.dias-a.dias);
-    },[clients,transcripts,recentContacts]),
-    refresh:()=>setTick(t=>t+1),
-  };
+const DIAS_ALERTA = 14;
+const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
+
+function getRecentContacts():Record<string,string>{
+  try{const raw=localStorage.getItem(RECENT_CONTACTS_KEY);return raw?JSON.parse(raw):{};}catch{return {};}
+}
+function saveRecentContact(clientId:string,date:string){
+  try{const data=getRecentContacts();data[clientId]=date;localStorage.setItem(RECENT_CONTACTS_KEY,JSON.stringify(data));}catch{}
+}
+function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentContacts:Record<string,string>):Date|null{
+  const fechas:Date[]=[];
+  if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
+  if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
+  if(recentContacts[c.id]){const d=new Date(recentContacts[c.id]);if(!isNaN(d.getTime()))fechas.push(d);}
+  for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
+  for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
+  if(fechas.length===0)return null;
+  return new Date(Math.max(...fechas.map(d=>d.getTime())));
 }
 
-function SinContactoAlert({clients,transcripts,onEdit}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void}){
-  const [collapsed,setCollapsed]=useState(true);
-  const {alertas,refresh}=useSinContacto(clients,transcripts);
-  useEffect(()=>{
-    (window as unknown as Record<string,unknown>).__refreshSinContacto=refresh;
-    return ()=>{delete (window as unknown as Record<string,unknown>).__refreshSinContacto;};
-  },[refresh]);
-  if(alertas.length===0)return null;
-  return(
-    <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:"14px",overflow:"hidden"}}>
-      <button onClick={()=>setCollapsed(c=>!c)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
-        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-          <span style={{fontSize:"16px"}}>⏰</span>
-          <div style={{textAlign:"left"}}>
-            <div style={{fontSize:"13px",fontWeight:600,color:"#9A3412"}}>
-              {alertas.length} cliente{alertas.length>1?"s":""} sin contacto hace +{DIAS_ALERTA} días
-            </div>
-            <div style={{fontSize:"11px",color:"#C2410C"}}>Pipeline P1 · Requiere atención</div>
-          </div>
-        </div>
-        <span style={{color:"#C2410C",fontSize:"12px"}}>{collapsed?"▼":"▲"}</span>
-      </button>
-      {!collapsed&&(
-        <div style={{borderTop:"1px solid #FED7AA",padding:"10px 16px",display:"flex",flexDirection:"column",gap:"6px"}}>
-          {alertas.map(({client,dias,ultimaActividad})=>(
-            <div key={client.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"8px 10px",background:"white",borderRadius:"10px",border:"1px solid #FED7AA"}}>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:"12px",fontWeight:600,color:"#1A1A1A"}}>{client.companyName}</div>
-                <div style={{fontSize:"11px",color:"#8A8A8A",marginTop:"1px"}}>
-                  {client.subStage&&<span style={{marginRight:"8px"}}>{client.subStage}</span>}
-                  Última actividad: {ultimaActividad}
-                </div>
-              </div>
-              <div style={{flexShrink:0,textAlign:"right"}}>
-                <div style={{fontSize:"12px",fontWeight:700,color:dias>30?"#dc2626":"#ea580c"}}>{dias} días</div>
-                <button onClick={()=>onEdit(client.id)} style={{fontSize:"10px",padding:"2px 8px",borderRadius:"6px",border:"1px solid #FED7AA",background:"white",cursor:"pointer",color:"#C2410C",marginTop:"2px"}}>Editar</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── AI Pendientes Panel ──────────────────────────────────────────────────────
-function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
-  const [open,setOpen]=useState(false);
-  const [loading,setLoading]=useState(false);
-  const [generated,setGenerated]=useState(false);
-  const [localTasks,setLocalTasks]=useState<Record<string,ClientTask[]>>({});
-  const companiesWithTranscripts=useMemo(()=>new Set(transcripts.map(t=>t.company.toLowerCase())),[transcripts]);
-  const clientsToProcess=useMemo(()=>clients.filter(c=>c.nextAction?.trim()||companiesWithTranscripts.has(c.companyName.toLowerCase())),[clients,companiesWithTranscripts,transcripts]);
-
-  async function generar(){
-    if(!clientsToProcess.length)return; setLoading(true);setGenerated(false);
-    const result:Record<string,ClientTask[]>={};
-    for(const client of clientsToProcess){
-      const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).sort((a,b)=>a.date>b.date?-1:1).slice(0,3).map(t=>`[${t.date}] ${t.transcript}`);
-      try{
-        const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:`${client.stage}${client.subStage?` · ${client.subStage}`:""}`,comment:client.nextAction||"(sin comentario anotado)",transcripts:clientTranscripts})});
-        const data=await res.json() as {tasks?:string[]};
-        result[client.id]=(data.tasks||[]).map((t:string)=>({id:newId(),text:t,done:false}));
-      }catch{result[client.id]=client.nextAction?[{id:newId(),text:client.nextAction,done:false}]:[];}
-    }
-    setLocalTasks(result);
-    // Guardar en estado global para que Mi semana las vea
-    for(const [clientId,tasks] of Object.entries(result)){
-      onUpdateTasks(clientId,tasks);
-    }
-    setLoading(false);setGenerated(true);
-  }
-
-  function toggleTask(clientId:string,taskId:string){
-    setLocalTasks(prev=>{
-      const tasks=(prev[clientId]||[]).map(t=>{
-        if(t.id!==taskId)return t;
-        const done=!t.done;
-        const isEmail=/correo|email|mail|mensaje|whatsapp|escribir|enviar/i.test(t.text);
-        const followUp:FollowUp|undefined=done&&isEmail&&!t.followUp?{id:newId(),text:`Esperar respuesta — ${t.text.substring(0,60)}`,dueDateISO:addDays(todayISO(),5),done:false,dismissed:false}:t.followUp;
-        return {...t,done,followUp};
-      });
-      onUpdateTasks(clientId,tasks);
-      return {...prev,[clientId]:tasks};
-    });
-  }
-  function dismissFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,dismissed:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
-  function completeFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,done:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
-
-  const alarms=useMemo(()=>{const a:Array<{client:ClientRecord;task:ClientTask;followUp:FollowUp}>=[];for(const client of clients){for(const task of (localTasks[client.id]||client.aiTasks||[])){if(task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&isPast(task.followUp.dueDateISO)){a.push({client,task,followUp:task.followUp});}}}return a;},[clients,localTasks]);
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-      {alarms.length>0&&(
-        <div style={{background:D.alarmBg,border:`1px solid ${D.alarmBorder}`,borderRadius:"14px",padding:"12px 16px"}}>
-          <div style={{fontSize:"13px",fontWeight:600,color:"#dc2626",marginBottom:"8px"}}>⚠ {alarms.length} seguimiento{alarms.length>1?"s":""} vencido{alarms.length>1?"s":""}</div>
-          {alarms.map(({client,task,followUp},i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"6px",fontSize:"12px",color:"#7f1d1d"}}>
-              <span style={{flex:1}}><strong>{client.companyName}</strong> — {followUp.text} (venció {followUp.dueDateISO})</span>
-              <button onClick={()=>completeFollowUp(client.id,task.id)} style={{padding:"3px 8px",borderRadius:"6px",border:"1px solid #fca5a5",background:D.white,fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>Resuelto</button>
-              <button onClick={()=>dismissFollowUp(client.id,task.id)} style={{padding:"3px 8px",borderRadius:"6px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink3}}>Ignorar</button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
-        <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"1rem 1.25rem",background:"none",border:"none",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,${D.accent},${D.accentY})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",flexShrink:0}}>✦</div>
-            <div style={{textAlign:"left"}}>
-              <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Acciones recomendadas por IA</div>
-              <div style={{fontSize:"11px",color:D.ink3}}>{clientsToProcess.length} cliente{clientsToProcess.length!==1?"s":""} con comentarios o transcripciones</div>
-            </div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-            {generated&&<span style={{fontSize:"10px",padding:"2px 8px",borderRadius:"20px",background:`${D.accent}15`,color:D.accent,fontWeight:600}}>activo</span>}
-            <span style={{color:D.ink3,fontSize:"12px"}}>{open?"▲":"▼"}</span>
-          </div>
-        </button>
-        {open&&(
-          <div style={{borderTop:`1px solid ${D.border}`,padding:"1rem 1.25rem 1.25rem"}}>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"1rem"}}>
-              <button onClick={generar} disabled={loading||!clientsToProcess.length} style={{padding:"7px 16px",borderRadius:"10px",border:"none",background:loading?D.border:`linear-gradient(135deg,${D.accent},${D.accentY})`,color:loading?D.ink3:D.white,fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
-                {loading?"Analizando…":generated?"↻ Regenerar":"✦ Generar con IA"}
-              </button>
-            </div>
-            {!generated&&!loading&&<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,background:D.bg,padding:"2rem",textAlign:"center",color:D.ink3,fontSize:"12px"}}>Apretá "Generar con IA" para ver qué hacer con cada cliente</div>}
-            {loading&&<div style={{display:"flex",flexDirection:"column",gap:"8px"}}>{[...Array(3)].map((_,i)=><div key={i} style={{height:"56px",borderRadius:"10px",background:D.bg}}/>)}</div>}
-            {generated&&!loading&&(
-              <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                {clientsToProcess.map(client=>{
-                  const tasks=localTasks[client.id]||[];
-                  const hasDiio=companiesWithTranscripts.has(client.companyName.toLowerCase());
-                  return(
-                    <div key={client.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px"}}>
-                        <span style={{width:"6px",height:"6px",borderRadius:"50%",background:D.accent,flexShrink:0,display:"inline-block"}}/>
-                        {client.companyName}
-                        {client.subStage&&<span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>· {client.subStage}</span>}
-                        {hasDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>+ Diio</span>}
-                      </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
-                        {tasks.length===0&&<div style={{fontSize:"11px",color:D.ink3}}>Sin tareas generadas</div>}
-                        {tasks.map(task=>(
-                          <div key={task.id}>
-                            <label style={{display:"flex",alignItems:"flex-start",gap:"8px",cursor:"pointer"}}>
-                              <input type="checkbox" checked={task.done} onChange={()=>toggleTask(client.id,task.id)} style={{marginTop:"2px",accentColor:D.accent,flexShrink:0}}/>
-                              <span style={{fontSize:"12px",color:task.done?D.ink3:D.ink,textDecoration:task.done?"line-through":"none",lineHeight:1.4}}>{task.text}</span>
-                            </label>
-                            {task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&(
-                              <div style={{marginLeft:"24px",marginTop:"4px",padding:"5px 10px",borderRadius:"8px",background:isPast(task.followUp.dueDateISO)?D.alarmBg:"#FFF9F0",border:`1px solid ${isPast(task.followUp.dueDateISO)?D.alarmBorder:"#FDE68A"}`,fontSize:"11px",color:isPast(task.followUp.dueDateISO)?"#dc2626":"#92400e",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px"}}>
-                                <span>⏱ Seguimiento al {task.followUp.dueDateISO}{isPast(task.followUp.dueDateISO)?" — ¡VENCIDO!":""}</span>
-                                <button onClick={()=>completeFollowUp(client.id,task.id)} style={{padding:"2px 7px",borderRadius:"5px",border:"none",background:"transparent",fontSize:"10px",cursor:"pointer",color:"inherit",fontWeight:600}}>✓ Listo</button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Mi Día Panel ─────────────────────────────────────────────────────────────
-const MI_DIA_KEY = "solar-crm:midia";
-
-type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
-
-function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:ClientRecord[];onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void}){
-  const [open,setOpen]=useState(false);
+// ─── Dashboard Panel: Mi día + Sin contacto ────────────────────────────────────
+function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,alertOnly}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;alertOnly?:boolean}){
+  // Mi día state
+  const [miDiaOpen,setMiDiaOpen]=useState(false);
+  const [alertOpen,setAlertOpen]=useState(false);
   const [tasks,setTasks]=useState<DailyTask[]>([]);
   const [input,setInput]=useState("");
   const [selectedClient,setSelectedClient]=useState("");
   const [editingClientFor,setEditingClientFor]=useState<string|null>(null);
+  const [recentContacts,setRecentContacts]=useState<Record<string,string>>({});
   const hoy=todayISO();
 
   useEffect(()=>{
     try{
       const raw=localStorage.getItem(MI_DIA_KEY);
-      if(!raw)return;
-      const data=JSON.parse(raw) as DailyTask[];
-      setTasks(data.map(t=>t.done?t:{...t,date:hoy}));
+      if(raw)setTasks((JSON.parse(raw) as DailyTask[]).map(t=>t.done?t:{...t,date:hoy}));
     }catch{}
+    setRecentContacts(getRecentContacts());
   },[]);
   useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
+
+  // Alerta sin contacto — usa recentContacts del estado React, no localStorage
+  const alertas=useMemo(()=>{
+    const hoyDate=new Date();
+    return clients
+      .filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo")
+      .map(c=>{
+        const ultima=getLastActivity(c,transcripts,recentContacts);
+        if(!ultima)return {client:c,dias:999,ultimaActividad:"Sin registro"};
+        const dias=Math.floor((hoyDate.getTime()-ultima.getTime())/(1000*60*60*24));
+        return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
+      })
+      .filter(x=>x.dias>=DIAS_ALERTA)
+      .sort((a,b)=>b.dias-a.dias);
+  },[clients,transcripts,recentContacts]);
+
+  function markContact(clientId:string){
+    const newRecent={...recentContacts,[clientId]:hoy};
+    setRecentContacts(newRecent);
+    saveRecentContact(clientId,hoy);
+  }
 
   function addTask(){
     const text=input.trim(); if(!text)return;
@@ -593,13 +435,10 @@ function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:Clie
         if(client){
           const tipo:Meeting["type"]=/correo|email|mail|enviar/i.test(t.text)?"correo":/llamar|llamado|teléfono/i.test(t.text)?"llamado":"reunion";
           const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false};
-          const currentMeetings=client.meetings||[];
-          onUpdateMeetings(t.clientId,[...currentMeetings,m]);
+          onUpdateMeetings(t.clientId,[...(client.meetings||[]),m]);
           onUpdateLastContact(t.clientId);
-          // Guardar en localStorage y refrescar alerta inmediatamente
-          setRecentContact(t.clientId);
-          const fn=(window as unknown as Record<string,unknown>).__refreshSinContacto;
-          if(typeof fn==="function")(fn as ()=>void)();
+          // Actualizar recentContacts en el estado React → alerta se actualiza inmediatamente
+          markContact(t.clientId);
         }
       }
       return {...t,done:nowDone};
@@ -625,11 +464,7 @@ function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:Clie
         <input type="checkbox" checked={t.done} onChange={()=>toggleTask(t.id)} style={{accentColor:t.done?"#16a34a":D.accent,flexShrink:0}}/>
         <span style={{flex:1,fontSize:"12px",color:t.done?D.ink3:D.ink,textDecoration:t.done?"line-through":"none"}}>{t.text}</span>
         {t.date<hoy&&!t.done&&<span style={{fontSize:"10px",color:"#d97706",flexShrink:0}}>{t.date}</span>}
-        {!t.done&&(
-          <button onClick={()=>setEditingClientFor(editingClientFor===t.id?null:t.id)} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"6px",cursor:"pointer",fontSize:"10px",color:D.ink3,padding:"2px 6px",flexShrink:0}}>
-            {t.clientName?"✎":"+ cliente"}
-          </button>
-        )}
+        {!t.done&&<button onClick={()=>setEditingClientFor(editingClientFor===t.id?null:t.id)} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"6px",cursor:"pointer",fontSize:"10px",color:D.ink3,padding:"2px 6px",flexShrink:0}}>{t.clientName?"✎":"+ cliente"}</button>}
         <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px",flexShrink:0}}>×</button>
       </div>
       {t.clientName&&editingClientFor!==t.id&&(
@@ -643,7 +478,8 @@ function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:Clie
           <select defaultValue={t.clientId||""} onChange={e=>assignClient(t.id,e.target.value)} style={{...iStyle,fontSize:"11px"}} autoFocus>
             <option value="">Sin cliente</option>
             <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-            <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup><optgroup label="Prospectos Activos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+            <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+            <optgroup label="Prospectos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
           </select>
         </div>
       )}
@@ -651,50 +487,91 @@ function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:Clie
   );
 
   return(
-    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
-        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-          <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,#1D4ED8,#7C3AED)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>📋</div>
-          <div style={{textAlign:"left"}}>
-            <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Mi día</div>
-            <div style={{fontSize:"11px",color:D.ink3}}>
-              {pendientes.length>0?`${pendientes.length} pendiente${pendientes.length>1?"s":""}`:completadas.length>0?"✓ Todo completado":"Sin tareas para hoy"}
-              {pendientesDeAyer.length>0&&<span style={{color:"#d97706",marginLeft:"6px"}}>· {pendientesDeAyer.length} de ayer</span>}
-            </div>
-          </div>
-        </div>
-        <span style={{color:D.ink3,fontSize:"12px"}}>{open?"▲":"▼"}</span>
-      </button>
-      {open&&(
-        <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 16px"}}>
-          <div style={{display:"flex",flexDirection:"column",gap:"8px",marginBottom:"12px"}}>
-            <div style={{display:"flex",gap:"8px"}}>
-              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTask();}} placeholder="¿Qué querés hacer hoy? (Enter para guardar)" style={{...iStyle,flex:1}}/>
-              <button onClick={addTask} disabled={!input.trim()} style={{padding:"9px 14px",borderRadius:"10px",border:"none",background:input.trim()?`linear-gradient(135deg,#1D4ED8,#7C3AED)`:"#E5E7EB",color:input.trim()?"white":"#9CA3AF",fontSize:"12px",cursor:input.trim()?"pointer":"default",fontWeight:600,flexShrink:0}}>+ Agregar</button>
-            </div>
-            <select value={selectedClient} onChange={e=>setSelectedClient(e.target.value)} style={{...iStyle,fontSize:"11px",color:selectedClient?D.ink:D.ink3}}>
-              <option value="">Sin cliente asociado (opcional)</option>
-              <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-              <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup><optgroup label="Prospectos Activos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-            </select>
-          </div>
-          {pendientesDeAyer.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>{pendientesDeAyer.map(renderTask)}</div>)}
-          {pendientesDeHoy.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Hoy</div>{pendientesDeHoy.map(renderTask)}</div>)}
-          {completadas.length>0&&(
-            <div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
-                <div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div>
-                <button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer"}}>Limpiar</button>
+    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+      {/* Alerta sin contacto */}
+      {alertas.length>0&&(
+        <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:"14px",overflow:"hidden"}}>
+          <button onClick={()=>setAlertOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+              <span style={{fontSize:"16px"}}>⏰</span>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:"13px",fontWeight:600,color:"#9A3412"}}>{alertas.length} cliente{alertas.length>1?"s":""} sin contacto hace +{DIAS_ALERTA} días</div>
+                <div style={{fontSize:"11px",color:"#C2410C"}}>Pipeline P1 y Prospectos Activos · Requiere atención</div>
               </div>
-              {completadas.map(renderTask)}
+            </div>
+            <span style={{color:"#C2410C",fontSize:"12px"}}>{alertOpen?"▲":"▼"}</span>
+          </button>
+          {alertOpen&&(
+            <div style={{borderTop:"1px solid #FED7AA",padding:"10px 16px",display:"flex",flexDirection:"column",gap:"6px"}}>
+              {alertas.map(({client,dias,ultimaActividad})=>(
+                <div key={client.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"8px 10px",background:"white",borderRadius:"10px",border:"1px solid #FED7AA"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:"12px",fontWeight:600,color:"#1A1A1A"}}>{client.companyName}</div>
+                    <div style={{fontSize:"11px",color:"#8A8A8A",marginTop:"1px"}}>
+                      {client.subStage&&<span style={{marginRight:"8px"}}>{client.subStage}</span>}
+                      Última actividad: {ultimaActividad}
+                    </div>
+                  </div>
+                  <div style={{flexShrink:0,textAlign:"right"}}>
+                    <div style={{fontSize:"12px",fontWeight:700,color:dias>30?"#dc2626":"#ea580c"}}>{dias} días</div>
+                    <button onClick={()=>onEdit(client.id)} style={{fontSize:"10px",padding:"2px 8px",borderRadius:"6px",border:"1px solid #FED7AA",background:"white",cursor:"pointer",color:"#C2410C",marginTop:"2px"}}>Editar</button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-          {tasks.length===0&&<div style={{textAlign:"center",padding:"1.5rem",color:D.ink3,fontSize:"12px"}}>Sin tareas para hoy — agregá lo que querés hacer</div>}
         </div>
+      )}
+
+      {/* Mi día */}
+      {!alertOnly&&(
+        <button onClick={()=>setMiDiaOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+            <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,#1D4ED8,#7C3AED)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>📋</div>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Mi día</div>
+              <div style={{fontSize:"11px",color:D.ink3}}>
+                {pendientes.length>0?`${pendientes.length} pendiente${pendientes.length>1?"s":""}`:completadas.length>0?"✓ Todo completado":"Sin tareas para hoy"}
+                {pendientesDeAyer.length>0&&<span style={{color:"#d97706",marginLeft:"6px"}}>· {pendientesDeAyer.length} de ayer</span>}
+              </div>
+            </div>
+          </div>
+          <span style={{color:D.ink3,fontSize:"12px"}}>{miDiaOpen?"▲":"▼"}</span>
+        </button>
+        {miDiaOpen&&(
+          <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 16px"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:"8px",marginBottom:"12px"}}>
+              <div style={{display:"flex",gap:"8px"}}>
+                <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTask();}} placeholder="¿Qué querés hacer hoy? (Enter para guardar)" style={{...iStyle,flex:1}}/>
+                <button onClick={addTask} disabled={!input.trim()} style={{padding:"9px 14px",borderRadius:"10px",border:"none",background:input.trim()?`linear-gradient(135deg,#1D4ED8,#7C3AED)`:"#E5E7EB",color:input.trim()?"white":"#9CA3AF",fontSize:"12px",cursor:input.trim()?"pointer":"default",fontWeight:600,flexShrink:0}}>+ Agregar</button>
+              </div>
+              <select value={selectedClient} onChange={e=>setSelectedClient(e.target.value)} style={{...iStyle,fontSize:"11px",color:selectedClient?D.ink:D.ink3}}>
+                <option value="">Sin cliente asociado (opcional)</option>
+                <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+                <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+                <optgroup label="Prospectos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+              </select>
+            </div>
+            {pendientesDeAyer.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>{pendientesDeAyer.map(renderTask)}</div>)}
+            {pendientesDeHoy.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Hoy</div>{pendientesDeHoy.map(renderTask)}</div>)}
+            {completadas.length>0&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                  <div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div>
+                  <button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer"}}>Limpiar</button>
+                </div>
+                {completadas.map(renderTask)}
+              </div>
+            )}
+            {tasks.length===0&&<div style={{textAlign:"center",padding:"1.5rem",color:D.ink3,fontSize:"12px"}}>Sin tareas para hoy — agregá lo que querés hacer</div>}
+          </div>
+        )}
+      </div>
       )}
     </div>
   );
 }
+
 
 // ─── Dashboard Charts ─────────────────────────────────────────────────────────
 function ProbChart({clients}:{clients:ClientRecord[]}){
@@ -1148,7 +1025,7 @@ function ConversionRate({clients}:{clients:ClientRecord[]}){
   );
 }
 
-function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
+function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateLastContact}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateLastContact:(id:string)=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
   const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
   const bySubStage=useMemo(()=>{
@@ -1175,7 +1052,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
         ))}
       </div>
       <FiltrosPipeline subStages={P1_SUBSTAGE_ORDER} onFilter={setFiltro}/>
-      <SinContactoAlert clients={clients} transcripts={transcripts} onEdit={onEdit}/>
+      <DashboardPanels clients={clients} transcripts={transcripts} onEdit={onEdit} onUpdateMeetings={onUpdateMeetings} onUpdateLastContact={onUpdateLastContact} alertOnly/>
       <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
@@ -1516,8 +1393,7 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
-            <SinContactoAlert clients={activeClients} transcripts={transcripts} onEdit={openEdit}/>
-            <MiDiaPanel clients={activeClients} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact}/>
+            <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
@@ -1529,7 +1405,7 @@ export default function Home(){
           </div>
         )}
         {activeTab==="semana"&&<SemanaTab clients={activeClients} transcripts={transcripts} onUpdateTasks={updateClientTasks}/>}
-        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote}/>}
+        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote} onUpdateLastContact={updateClientLastContact}/>}
         {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote}/>}
         {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
