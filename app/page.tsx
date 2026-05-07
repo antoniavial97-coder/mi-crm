@@ -341,7 +341,7 @@ const DIAS_ALERTA = 14;
 
 function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
   return useMemo(()=>{
-    const p1=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado");
+    const p1=clients.filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo");
     const hoy=new Date();
     return p1.map(c=>{
       // Última actividad: stageDate, reuniones, transcripciones
@@ -580,7 +580,7 @@ function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateM
   const completadas=tasks.filter(t=>t.done);
   const pendientesDeAyer=pendientes.filter(t=>t.date<hoy);
   const pendientesDeHoy=pendientes.filter(t=>t.date===hoy);
-  const pipelineClients=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").sort((a,b)=>a.companyName.localeCompare(b.companyName));
+  const pipelineClients=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2"||c.stage==="Prospecto Activo").sort((a,b)=>a.companyName.localeCompare(b.companyName));
 
   const renderTask=(t:DailyTask)=>(
     <div key={t.id} style={{padding:"7px 10px",borderRadius:"8px",background:t.date<hoy?"#FFFBEB":t.done?"#F0FBF4":D.bg,border:t.date<hoy?"1px solid #FDE68A":"none",marginBottom:"4px"}}>
@@ -606,7 +606,7 @@ function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateM
           <select defaultValue={t.clientId||""} onChange={e=>assignClient(t.id,e.target.value)} style={{...iStyle,fontSize:"11px"}} autoFocus>
             <option value="">Sin cliente</option>
             <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-            <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+            <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup><optgroup label="Prospectos Activos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
           </select>
         </div>
       )}
@@ -638,7 +638,7 @@ function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateM
             <select value={selectedClient} onChange={e=>setSelectedClient(e.target.value)} style={{...iStyle,fontSize:"11px",color:selectedClient?D.ink:D.ink3}}>
               <option value="">Sin cliente asociado (opcional)</option>
               <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-              <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
+              <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup><optgroup label="Prospectos Activos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
             </select>
           </div>
           {pendientesDeAyer.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>{pendientesDeAyer.map(renderTask)}</div>)}
