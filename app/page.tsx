@@ -8,7 +8,7 @@ type SubStage =
   | "Evaluación preliminar" | "Primera presentación preliminar"
   | "Visita técnica realizada" | "Presentación final"
   | "Contrato en revisión" | "Contrato firmado";
-type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos";
+type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type Meeting = { id: string; date: string; type: "reunion"|"llamado"; summary?: string; notes?: string; fromDiio?: boolean; };
@@ -245,6 +245,19 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
   return(
     <div>
+      {/* Historial de etapa */}
+      {client.stageDate&&(
+        <div style={{background:D.bg,borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
+          <div style={{fontSize:"11px",color:D.ink3}}>Etapa actual:</div>
+          <div style={{fontSize:"12px",fontWeight:600,color:D.accent}}>{client.subStage||client.stage}</div>
+          <div style={{fontSize:"11px",color:D.ink3}}>desde</div>
+          <div style={{fontSize:"12px",fontWeight:500,color:D.ink}}>{formatDateShort(client.stageDate)}</div>
+          <div style={{fontSize:"11px",color:D.ink3}}>·</div>
+          <div style={{fontSize:"12px",fontWeight:600,color:Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24))>30?"#dc2626":"#16a34a"}}>
+            {Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24))} días en esta etapa
+          </div>
+        </div>
+      )}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
         <div style={{fontSize:"13px",color:D.ink3}}>{meetings.length} interacciones registradas</div>
         <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:D.ink,color:D.white,fontSize:"12px",cursor:"pointer",fontWeight:600}}>
@@ -708,7 +721,86 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
 }
 
 // ─── Client Card ─────────────────────────────────────────────────────────────
-function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings,onUpdateNote}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
+  const [showDetail,setShowDetail]=useState(false);
+  const [editingNote,setEditingNote]=useState(false);
+  const [noteVal,setNoteVal]=useState(client.nextAction);
+  const isSigned=client.subStage==="Contrato firmado";
+  const isPresentacion=client.subStage==="Presentación final";
+  const closingD=isPresentacion&&client.stageDate?closingDate(client.subStage,client.stageDate):null;
+  const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
+  const daysInStage=client.stageDate?Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24)):null;
+
+  function saveNote(){onUpdateNote(client.id,noteVal);setEditingNote(false);}
+
+  return(
+    <>
+    <div style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"14px",transition:"box-shadow 0.15s"}}
+      onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.07)")}
+      onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:"8px",marginBottom:"8px"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"5px"}}>
+            {isSigned&&<span style={{color:"#22c55e",fontSize:"12px"}}>✓</span>}
+            <button onClick={()=>setShowDetail(true)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:600,color:D.ink,padding:0,textAlign:"left"}}>
+              {client.companyName||"Sin empresa"}
+            </button>
+          </div>
+          <div style={{fontSize:"11px",color:D.ink3,marginTop:"2px"}}>
+            <ContactPopup contacts={contacts} companyName={client.companyName} contactName={client.contactName}/>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"4px",flexShrink:0,alignItems:"flex-start"}}>
+          {meetingCount>0&&<button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver reuniones">📅{meetingCount}</button>}
+          <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
+          <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
+        </div>
+      </div>
+      {client.subStage&&(
+        <div style={{marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+          <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
+          {client.salesforce&&<span style={{fontSize:"9px",fontWeight:600,color:"#1D4ED8",background:"#EFF6FF",padding:"1px 6px",borderRadius:"10px",border:"1px solid #BFDBFE"}}>SF ✓</span>}
+          {daysInStage!==null&&<span style={{fontSize:"9px",color:daysInStage>30?"#dc2626":D.ink3}}>⏱ {daysInStage}d</span>}
+          {isPresentacion&&client.stageDate&&(
+            <span style={{fontSize:"10px",color:D.ink3}}>
+              Pres. {formatDateShort(client.stageDate)}{closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
+            </span>
+          )}
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"8px"}}>
+        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>MWp</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.mwp.toFixed(2)}</div></div>
+        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>Prob.</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div></div>
+      </div>
+      {/* Nota rápida inline */}
+      <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px",borderLeft:`2px solid ${D.border}`,cursor:"pointer"}} onClick={()=>!editingNote&&setEditingNote(true)}>
+        <div style={{fontSize:"10px",color:D.ink3,marginBottom:"2px",display:"flex",justifyContent:"space-between"}}>
+          <span>Comentario</span>
+          {!editingNote&&<span style={{color:D.accent,fontSize:"9px"}}>✎ editar</span>}
+        </div>
+        {editingNote?(
+          <div onClick={e=>e.stopPropagation()}>
+            <textarea value={noteVal} onChange={e=>setNoteVal(e.target.value)} rows={2} style={{...iStyle,fontSize:"12px",resize:"none",marginBottom:"6px"}} autoFocus onKeyDown={e=>{if(e.key==="Enter"&&e.metaKey)saveNote();if(e.key==="Escape"){setNoteVal(client.nextAction);setEditingNote(false);}}}/>
+            <div style={{display:"flex",gap:"6px",justifyContent:"flex-end"}}>
+              <button onClick={()=>{setNoteVal(client.nextAction);setEditingNote(false);}} style={{padding:"3px 10px",borderRadius:"6px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
+              <button onClick={saveNote} style={{padding:"3px 10px",borderRadius:"6px",border:"none",background:D.accent,fontSize:"11px",cursor:"pointer",color:D.white,fontWeight:600}}>Guardar</button>
+            </div>
+          </div>
+        ):(
+          <div style={{fontSize:"12px",color:client.nextAction?D.ink2:D.ink3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>
+            {client.nextAction||"Click para agregar comentario…"}
+          </div>
+        )}
+      </div>
+    </div>
+    {showDetail&&(
+      <Modal open={showDetail} title={`${client.companyName} — Reuniones y llamados`} onClose={()=>setShowDetail(false)} wide>
+        <ClientDetailModal client={client} transcripts={transcripts} onUpdateMeetings={(meetings)=>onUpdateMeetings(client.id,meetings)} onClose={()=>setShowDetail(false)}/>
+      </Modal>
+    )}
+    </>
+  );
+}
   const [showDetail,setShowDetail]=useState(false);
   const isSigned=client.subStage==="Contrato firmado";
   const isPresentacion=client.subStage==="Presentación final";
@@ -788,9 +880,156 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
 }
 
 // ─── Tab Views ────────────────────────────────────────────────────────────────
-function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+// ─── Semana Tab ───────────────────────────────────────────────────────────────
+function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
+  const tareas=useMemo(()=>{
+    const result:Array<{client:ClientRecord;task:ClientTask;urgencia:number}>=[];
+    const hoy=new Date();
+    for(const client of clients.filter(c=>c.stage!=="Perdido")){
+      for(const task of (client.aiTasks||[])){
+        if(task.done)continue;
+        let urgencia=0;
+        if(task.followUp&&!task.followUp.done&&!task.followUp.dismissed){
+          const dias=Math.floor((hoy.getTime()-new Date(task.followUp.dueDateISO).getTime())/(1000*60*60*24));
+          urgencia=dias>0?100+dias:50;
+        }
+        if(client.stage==="Pipeline P1")urgencia+=30;
+        if(client.stage==="Pipeline P2")urgencia+=10;
+        result.push({client,task,urgencia});
+      }
+    }
+    return result.sort((a,b)=>b.urgencia-a.urgencia);
+  },[clients]);
+
+  function toggleTask(clientId:string,taskId:string){
+    const client=clients.find(c=>c.id===clientId);
+    if(!client)return;
+    const tasks=(client.aiTasks||[]).map(t=>t.id===taskId?{...t,done:!t.done}:t);
+    onUpdateTasks(clientId,tasks);
+  }
+
+  const pendientes=tareas.filter(t=>!t.task.done);
+  const completadas=tareas.filter(t=>t.task.done);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:"1rem"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px"}}>
+        {[{l:"Tareas pendientes",v:pendientes.length,accent:true},{l:"Completadas",v:completadas.length},{l:"Clientes con tareas",v:new Set(tareas.map(t=>t.client.id)).size}].map((m,i)=>(
+          <div key={i} style={{background:D.white,border:`1px solid ${m.accent?`${D.accent}44`:D.border}`,borderRadius:"14px",padding:"1rem",borderLeft:m.accent?`3px solid ${D.accent}`:"none"}}>
+            <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>{m.l}</div>
+            <div style={{fontSize:"22px",fontWeight:700,color:m.accent?D.accent:D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
+          </div>
+        ))}
+      </div>
+      {pendientes.length===0&&<div style={{textAlign:"center",padding:"3rem",color:D.ink3,fontSize:"13px",border:`1px dashed ${D.border}`,borderRadius:"14px"}}>🎉 Sin tareas pendientes — generá acciones con IA en cada pestaña</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+        {pendientes.map(({client,task,urgencia},i)=>(
+          <div key={i} style={{background:D.white,border:`1px solid ${urgencia>=100?D.alarmBorder:D.border}`,borderRadius:"12px",padding:"12px 14px",display:"flex",gap:"12px",alignItems:"flex-start"}}>
+            <input type="checkbox" checked={false} onChange={()=>toggleTask(client.id,task.id)} style={{marginTop:"2px",accentColor:D.accent,flexShrink:0}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:"12px",color:D.ink,lineHeight:1.4,marginBottom:"4px"}}>{task.text}</div>
+              <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{fontSize:"10px",fontWeight:600,color:client.stage==="Pipeline P1"?D.accent:"#7C3AED",background:client.stage==="Pipeline P1"?`${D.accent}15`:"#F5F3FF",padding:"1px 7px",borderRadius:"10px"}}>{client.companyName}</span>
+                {client.subStage&&<span style={{fontSize:"10px",color:D.ink3}}>{client.subStage}</span>}
+                {task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&(
+                  <span style={{fontSize:"10px",color:urgencia>=100?"#dc2626":"#92400e",fontWeight:600}}>
+                    ⏱ {urgencia>=100?"VENCIDO":"Vence"} {task.followUp.dueDateISO}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Filtros Pipeline ─────────────────────────────────────────────────────────
+function FiltrosPipeline({subStages,onFilter}:{subStages:SubStage[];onFilter:(f:{subStage:string;minMwp:number;soloSf:boolean})=>void}){
+  const [subStage,setSubStage]=useState("");
+  const [minMwp,setMinMwp]=useState(0);
+  const [soloSf,setSoloSf]=useState(false);
+  useEffect(()=>onFilter({subStage,minMwp,soloSf}),[subStage,minMwp,soloSf]);
+  const active=subStage||minMwp>0||soloSf;
+  return(
+    <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center",padding:"10px 14px",background:active?`${D.accent}08`:D.white,border:`1px solid ${active?`${D.accent}44`:D.border}`,borderRadius:"12px"}}>
+      <span style={{fontSize:"11px",fontWeight:600,color:D.ink2,flexShrink:0}}>🔍 Filtros</span>
+      <select value={subStage} onChange={e=>setSubStage(e.target.value)} style={{...iStyle,width:"auto",fontSize:"11px",padding:"4px 8px"}}>
+        <option value="">Todas las etapas</option>
+        {P1_SUBSTAGE_ORDER.map(s=><option key={s} value={s}>{s}</option>)}
+      </select>
+      <div style={{display:"flex",alignItems:"center",gap:"4px"}}>
+        <span style={{fontSize:"11px",color:D.ink2}}>MWp ≥</span>
+        <input type="number" value={minMwp||""} onChange={e=>setMinMwp(Number(e.target.value)||0)} placeholder="0" style={{...iStyle,width:"60px",fontSize:"11px",padding:"4px 8px"}}/>
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:"4px",cursor:"pointer",fontSize:"11px",color:D.ink2}}>
+        <input type="checkbox" checked={soloSf} onChange={e=>setSoloSf(e.target.checked)} style={{accentColor:"#1D4ED8"}}/>
+        Solo Salesforce
+      </label>
+      {active&&<button onClick={()=>{setSubStage("");setMinMwp(0);setSoloSf(false);}} style={{fontSize:"10px",padding:"3px 8px",borderRadius:"6px",border:`1px solid ${D.border}`,background:D.white,cursor:"pointer",color:D.ink3}}>× Limpiar</button>}
+    </div>
+  );
+}
+
+// ─── Tasa de Conversión ───────────────────────────────────────────────────────
+function ConversionRate({clients}:{clients:ClientRecord[]}){
+  const stats=useMemo(()=>{
+    const prospectos=clients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo").length;
+    const pipeline=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").length;
+    const firmados=clients.filter(c=>c.subStage==="Contrato firmado").length;
+    const perdidos=clients.filter(c=>c.stage==="Perdido").length;
+    const total=prospectos+pipeline+firmados+perdidos;
+    const convProsp=total>0?Math.round((pipeline+firmados)/(total)*100):0;
+    const convPipe=pipeline+firmados>0?Math.round(firmados/(pipeline+firmados)*100):0;
+    return{prospectos,pipeline,firmados,perdidos,convProsp,convPipe};
+  },[clients]);
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.25rem"}}>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"1rem"}}>Tasa de conversión</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:"12px"}}>
+        <div style={{background:D.bg,borderRadius:"10px",padding:"12px"}}>
+          <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Prospectos → Pipeline</div>
+          <div style={{fontSize:"28px",fontWeight:700,color:stats.convProsp>=50?"#16a34a":D.accent,fontFamily:"'DM Serif Display',serif"}}>{stats.convProsp}%</div>
+          <div style={{fontSize:"11px",color:D.ink3,marginTop:"4px"}}>{stats.pipeline+stats.firmados} de {stats.prospectos+stats.pipeline+stats.firmados+stats.perdidos} clientes</div>
+          <div style={{marginTop:"8px",height:"4px",background:D.border,borderRadius:"2px"}}>
+            <div style={{height:"100%",width:`${stats.convProsp}%`,background:`linear-gradient(90deg,${D.accentY},${D.accent})`,borderRadius:"2px"}}/>
+          </div>
+        </div>
+        <div style={{background:D.bg,borderRadius:"10px",padding:"12px"}}>
+          <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Pipeline → Firmado</div>
+          <div style={{fontSize:"28px",fontWeight:700,color:stats.convPipe>=30?"#16a34a":D.accent,fontFamily:"'DM Serif Display',serif"}}>{stats.convPipe}%</div>
+          <div style={{fontSize:"11px",color:D.ink3,marginTop:"4px"}}>{stats.firmados} de {stats.pipeline+stats.firmados} proyectos</div>
+          <div style={{marginTop:"8px",height:"4px",background:D.border,borderRadius:"2px"}}>
+            <div style={{height:"100%",width:`${stats.convPipe}%`,background:"linear-gradient(90deg,#4ade80,#16a34a)",borderRadius:"2px"}}/>
+          </div>
+        </div>
+      </div>
+      <div style={{marginTop:"10px",paddingTop:"10px",borderTop:`1px solid ${D.border}`,display:"flex",gap:"16px",fontSize:"11px",color:D.ink3,flexWrap:"wrap"}}>
+        <span>🔵 Prospectos: <strong>{stats.prospectos}</strong></span>
+        <span>🟠 Pipeline: <strong>{stats.pipeline}</strong></span>
+        <span>🟢 Firmados: <strong>{stats.firmados}</strong></span>
+        <span>🔴 Perdidos: <strong>{stats.perdidos}</strong></span>
+      </div>
+    </div>
+  );
+}
+
+function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
-  const bySubStage=useMemo(()=>{const m=new Map<SubStage,ClientRecord[]>(); for(const s of P1_SUBSTAGE_ORDER)m.set(s,[]); for(const c of p1){const k=c.subStage??("Evaluación preliminar" as SubStage); m.get(k)?.push(c);} return m;},[p1]);
+  const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
+  const bySubStage=useMemo(()=>{
+    const m=new Map<SubStage,ClientRecord[]>();
+    for(const s of P1_SUBSTAGE_ORDER)m.set(s,[]);
+    for(const c of p1){
+      if(filtro.subStage&&c.subStage!==filtro.subStage)continue;
+      if(filtro.minMwp&&c.mwp<filtro.minMwp)continue;
+      if(filtro.soloSf&&!c.salesforce)continue;
+      const k=c.subStage??("Evaluación preliminar" as SubStage);
+      m.get(k)?.push(c);
+    }
+    return m;
+  },[p1,filtro]);
   const metrics=useMemo(()=>{const signed=p1.filter(c=>c.subStage==="Contrato firmado");const active=p1.filter(c=>c.subStage!=="Contrato firmado");return{active:active.length,signed:signed.length,mwpActive:active.reduce((s,c)=>s+(c.mwp||0),0),mwpSigned:signed.reduce((s,c)=>s+(c.mwp||0),0)};},[p1]);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
@@ -802,6 +1041,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
           </div>
         ))}
       </div>
+      <FiltrosPipeline subStages={P1_SUBSTAGE_ORDER} onFilter={setFiltro}/>
       <SinContactoAlert clients={clients} transcripts={transcripts} onEdit={onEdit}/>
       <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
@@ -816,7 +1056,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
                 <div style={{fontSize:"11px",color:D.ink3}}>{items.length} cliente{items.length!==1?"s":""}</div>
                 {!isSigned&&<span style={{marginLeft:"auto",fontSize:"11px",fontWeight:700,color:D.accent,background:`${D.accent}12`,padding:"3px 9px",borderRadius:"20px"}}>{SUBSTAGE_PROB[sub]}%</span>}
               </div>
-              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
+              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
             </div>
           );
         })}
@@ -825,8 +1065,14 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
   );
 }
 
-function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
   const p2=clients.filter(c=>c.stage==="Pipeline P2");
+  const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
+  const p2Filtered=useMemo(()=>p2.filter(c=>{
+    if(filtro.minMwp&&c.mwp<filtro.minMwp)return false;
+    if(filtro.soloSf&&!c.salesforce)return false;
+    return true;
+  }),[p2,filtro]);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px"}}>
@@ -837,9 +1083,10 @@ function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
           </div>
         ))}
       </div>
+      <FiltrosPipeline subStages={[]} onFilter={setFiltro}/>
       <AIPendientesPanel clients={p2} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
-        {p2.length?p2.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes en Pipeline P2</div>)}
+        {p2Filtered.length?p2Filtered.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes{filtro.soloSf||filtro.minMwp?" con estos filtros":" en Pipeline P2"}</div>)}
       </div>
     </div>
   );
@@ -994,6 +1241,7 @@ export default function Home(){
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));}
+  function updateClientNote(clientId:string,note:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
   function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[]});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
@@ -1032,8 +1280,32 @@ export default function Home(){
     };
   },[activeClients]);
 
+  async function exportToExcel(){
+    try{
+      const rows=(c:ClientRecord)=>[c.companyName,c.contactName,c.stage,c.subStage||"",c.mwp,c.closeProbabilityPct,c.nextAction,c.stageDate||"",c.salesforce?"Sí":"No",c.createdAtISO];
+      const header=["Empresa","Contacto","Etapa","Sub-etapa","MWp","Prob%","Comentario","Fecha etapa","Salesforce","Fecha ingreso"];
+      const pipeline=activeClients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
+      const prospectos=activeClients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo");
+      const perdidos=clients.filter(c=>c.stage==="Perdido");
+      const toCSV=(data:ClientRecord[])=>[header,...data.map(rows)].map(r=>r.map(v=>typeof v==="string"&&v.includes(",")? `"${v}"`:v).join(",")).join("\n");
+      const content=`Pipeline P1 y P2\n${toCSV(pipeline)}\n\nProspectos\n${toCSV(prospectos)}\n\nPerdidos\n${toCSV(perdidos)}`;
+      const blob=new Blob(["\ufeff"+content],{type:"text/csv;charset=utf-8;"});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");a.href=url;a.download=`CRM_Solarity_${todayISO()}.csv`;a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){window.alert("Error al exportar");}
+  }
+
   const perdidosCount=useMemo(()=>clients.filter(c=>c.stage==="Perdido").length,[clients]);
-  const tabs:[Tab,string][]=[["dashboard","Dashboard"],["pipeline1","Pipeline P1"],["pipeline2","Pipeline P2"],["prospectos","Prospectos"],["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ]];
+  const tareasCount=useMemo(()=>activeClients.reduce((s,c)=>(c.aiTasks||[]).filter(t=>!t.done).length+s,0),[activeClients]);
+  const tabs:[Tab,string][]=[
+    ["dashboard","Dashboard"],
+    ["semana",`Mi semana${tareasCount>0?` (${tareasCount})`:""}` ],
+    ["pipeline1","Pipeline P1"],
+    ["pipeline2","Pipeline P2"],
+    ["prospectos","Prospectos"],
+    ["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ],
+  ];
 
   return(
     <div style={{minHeight:"100dvh",background:D.bg}}>
@@ -1050,6 +1322,7 @@ export default function Home(){
               </div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+              <button onClick={exportToExcel} style={{padding:"6px 13px",borderRadius:"9px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2,fontWeight:500}}>↓ Excel</button>
               <button onClick={loadFromSheet} disabled={sheetStatus==="loading"} style={{padding:"6px 13px",borderRadius:"9px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:sheetStatus==="ok"?"#166534":sheetStatus==="error"?"#dc2626":D.ink2,fontWeight:500}}>
                 {sheetStatus==="loading"?"⏳ Sync…":sheetStatus==="ok"?"✓ Sincronizado":sheetStatus==="error"?"⚠ Error · Reintentar":"↻ Cargar"}
               </button>
@@ -1096,11 +1369,15 @@ export default function Home(){
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
             </div>
-            <PipelineGeneradoChart clients={clients}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+              <PipelineGeneradoChart clients={clients}/>
+              <ConversionRate clients={clients}/>
+            </div>
           </div>
         )}
-        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
-        {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
+        {activeTab==="semana"&&<SemanaTab clients={activeClients} transcripts={transcripts} onUpdateTasks={updateClientTasks}/>}
+        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote}/>}
+        {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote}/>}
         {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
       </div>
