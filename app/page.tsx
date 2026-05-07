@@ -338,6 +338,8 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
 const DIAS_ALERTA = 14;
 const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
+const MI_DIA_KEY = "solar-crm:midia";
+type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
 
 function getRecentContacts():Record<string,string>{
   try{const raw=localStorage.getItem(RECENT_CONTACTS_KEY);return raw?JSON.parse(raw):{};}catch{return {};}
