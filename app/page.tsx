@@ -349,7 +349,7 @@ function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
 }
 
 function SinContactoAlert({clients,transcripts,onEdit}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void}){
-  const [collapsed,setCollapsed]=useState(false);
+  const [collapsed,setCollapsed]=useState(true);
   const alertas=useSinContacto(clients,transcripts);
   if(alertas.length===0)return null;
   return(
