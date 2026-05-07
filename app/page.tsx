@@ -346,6 +346,7 @@ function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
     return p1.map(c=>{
       const fechas:Date[]=[];
       if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
+      if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
       for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
       const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
       for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
@@ -528,7 +529,7 @@ const MI_DIA_KEY = "solar-crm:midia";
 
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
 
-function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:ClientRecord[];onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void}){
   const [open,setOpen]=useState(false);
   const [tasks,setTasks]=useState<DailyTask[]>([]);
   const [input,setInput]=useState("");
@@ -561,9 +562,10 @@ function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateM
         if(client){
           const tipo:Meeting["type"]=/correo|email|mail|enviar/i.test(t.text)?"correo":/llamar|llamado|teléfono/i.test(t.text)?"llamado":"reunion";
           const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false};
-          // Usar los meetings actuales del cliente para no perder los anteriores
           const currentMeetings=client.meetings||[];
           onUpdateMeetings(t.clientId,[...currentMeetings,m]);
+          // Actualizar lastContactISO directamente para que la alerta lo detecte
+          onUpdateLastContact(t.clientId);
         }
       }
       return {...t,done:nowDone};
@@ -1338,6 +1340,7 @@ export default function Home(){
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));}
+  function updateClientLastContact(clientId:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,lastContactISO:todayISO(),updatedAtISO:todayISO()}:c));}
   function updateClientNote(clientId:string,note:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
   function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[]});setModalOpen(true);}
@@ -1480,7 +1483,7 @@ export default function Home(){
               </div>
             )}
             <SinContactoAlert clients={activeClients} transcripts={transcripts} onEdit={openEdit}/>
-            <MiDiaPanel clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
+            <MiDiaPanel clients={activeClients} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
