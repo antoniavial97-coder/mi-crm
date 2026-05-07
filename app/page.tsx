@@ -339,28 +339,59 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 // ─── Sin Contacto Alert ──────────────────────────────────────────────────────
 const DIAS_ALERTA = 14;
 
+const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
+
+function setRecentContact(clientId:string){
+  try{
+    const raw=localStorage.getItem(RECENT_CONTACTS_KEY);
+    const data:Record<string,string>=raw?JSON.parse(raw):{};
+    data[clientId]=todayISO();
+    localStorage.setItem(RECENT_CONTACTS_KEY,JSON.stringify(data));
+  }catch{}
+}
+
+function getRecentContacts():Record<string,string>{
+  try{
+    const raw=localStorage.getItem(RECENT_CONTACTS_KEY);
+    return raw?JSON.parse(raw):{};
+  }catch{return {};}
+}
+
 function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
-  return useMemo(()=>{
-    const p1=clients.filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo");
-    const hoy=new Date();
-    return p1.map(c=>{
-      const fechas:Date[]=[];
-      if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
-      if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
-      for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
-      const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
-      for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
-      if(fechas.length===0)return {client:c,dias:999,ultimaActividad:"Sin registro"};
-      const ultima=new Date(Math.max(...fechas.map(d=>d.getTime())));
-      const dias=Math.floor((hoy.getTime()-ultima.getTime())/(1000*60*60*24));
-      return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
-    }).filter(x=>x.dias>=DIAS_ALERTA).sort((a,b)=>b.dias-a.dias);
-  },[clients,transcripts]);
+  const [tick,setTick]=useState(0);
+  // Re-check cada vez que cambia el estado global
+  const recentContacts=useMemo(()=>getRecentContacts(),[tick,clients]);
+
+  return {
+    alertas: useMemo(()=>{
+      const p1=clients.filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo");
+      const hoy=new Date();
+      return p1.map(c=>{
+        const fechas:Date[]=[];
+        if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
+        if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
+        // Leer contacto reciente del localStorage
+        if(recentContacts[c.id]){const d=new Date(recentContacts[c.id]);if(!isNaN(d.getTime()))fechas.push(d);}
+        for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
+        const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
+        for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
+        if(fechas.length===0)return {client:c,dias:999,ultimaActividad:"Sin registro"};
+        const ultima=new Date(Math.max(...fechas.map(d=>d.getTime())));
+        const dias=Math.floor((hoy.getTime()-ultima.getTime())/(1000*60*60*24));
+        return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
+      }).filter(x=>x.dias>=DIAS_ALERTA).sort((a,b)=>b.dias-a.dias);
+    },[clients,transcripts,recentContacts]),
+    refresh:()=>setTick(t=>t+1),
+  };
 }
 
 function SinContactoAlert({clients,transcripts,onEdit}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void}){
   const [collapsed,setCollapsed]=useState(true);
-  const alertas=useSinContacto(clients,transcripts);
+  const {alertas,refresh}=useSinContacto(clients,transcripts);
+  useEffect(()=>{
+    (window as unknown as Record<string,unknown>).__refreshSinContacto=refresh;
+    return ()=>{delete (window as unknown as Record<string,unknown>).__refreshSinContacto;};
+  },[refresh]);
   if(alertas.length===0)return null;
   return(
     <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:"14px",overflow:"hidden"}}>
@@ -564,8 +595,11 @@ function MiDiaPanel({clients,onUpdateMeetings,onUpdateLastContact}:{clients:Clie
           const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false};
           const currentMeetings=client.meetings||[];
           onUpdateMeetings(t.clientId,[...currentMeetings,m]);
-          // Actualizar lastContactISO directamente para que la alerta lo detecte
           onUpdateLastContact(t.clientId);
+          // Guardar en localStorage y refrescar alerta inmediatamente
+          setRecentContact(t.clientId);
+          const fn=(window as unknown as Record<string,unknown>).__refreshSinContacto;
+          if(typeof fn==="function")(fn as ()=>void)();
         }
       }
       return {...t,done:nowDone};
