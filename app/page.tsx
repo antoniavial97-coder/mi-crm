@@ -409,7 +409,12 @@ function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRe
         result[client.id]=(data.tasks||[]).map((t:string)=>({id:newId(),text:t,done:false}));
       }catch{result[client.id]=client.nextAction?[{id:newId(),text:client.nextAction,done:false}]:[];}
     }
-    setLocalTasks(result);setLoading(false);setGenerated(true);
+    setLocalTasks(result);
+    // Guardar en estado global para que Mi semana las vea
+    for(const [clientId,tasks] of Object.entries(result)){
+      onUpdateTasks(clientId,tasks);
+    }
+    setLoading(false);setGenerated(true);
   }
 
   function toggleTask(clientId:string,taskId:string){
