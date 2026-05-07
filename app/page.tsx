@@ -344,9 +344,9 @@ function useSinContacto(clients:ClientRecord[], transcripts:TranscriptInfo[]){
     const p1=clients.filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo");
     const hoy=new Date();
     return p1.map(c=>{
-      // Última actividad: stageDate, reuniones, transcripciones
       const fechas:Date[]=[];
       if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
+      if(c.updatedAtISO){const d=new Date(c.updatedAtISO);if(!isNaN(d.getTime()))fechas.push(d);}
       for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
       const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase());
       for(const t of clientTranscripts){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
@@ -562,7 +562,9 @@ function MiDiaPanel({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateM
         if(client){
           const tipo:Meeting["type"]=/correo|email|mail|enviar/i.test(t.text)?"correo":/llamar|llamado|teléfono/i.test(t.text)?"llamado":"reunion";
           const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false};
-          onUpdateMeetings(t.clientId,[...(client.meetings||[]),m]);
+          // Usar los meetings actuales del cliente para no perder los anteriores
+          const currentMeetings=client.meetings||[];
+          onUpdateMeetings(t.clientId,[...currentMeetings,m]);
         }
       }
       return {...t,done:nowDone};
