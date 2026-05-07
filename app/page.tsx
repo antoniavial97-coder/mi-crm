@@ -801,60 +801,6 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
     </>
   );
 }
-  const [showDetail,setShowDetail]=useState(false);
-  const isSigned=client.subStage==="Contrato firmado";
-  const isPresentacion=client.subStage==="Presentación final";
-  const closingD=isPresentacion&&client.stageDate?closingDate(client.subStage,client.stageDate):null;
-  const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
-  return(
-    <>
-    <div style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"14px",transition:"box-shadow 0.15s"}}
-      onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.07)")}
-      onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:"8px",marginBottom:"8px"}}>
-        <div style={{minWidth:0}}>
-          <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"5px"}}>
-            {isSigned&&<span style={{color:"#22c55e",fontSize:"12px"}}>✓</span>}
-            <button onClick={()=>setShowDetail(true)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:600,color:D.ink,padding:0,textAlign:"left"}}>
-              {client.companyName||"Sin empresa"}
-            </button>
-          </div>
-          <div style={{fontSize:"11px",color:D.ink3,marginTop:"2px"}}>
-            <ContactPopup contacts={contacts} companyName={client.companyName} contactName={client.contactName}/>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:"4px",flexShrink:0,alignItems:"flex-start"}}>
-          {meetingCount>0&&<button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver reuniones">📅{meetingCount}</button>}
-          <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
-          <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
-        </div>
-      </div>
-      {client.subStage&&(
-        <div style={{marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
-          <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
-          {client.salesforce&&<span style={{fontSize:"9px",fontWeight:600,color:"#1D4ED8",background:"#EFF6FF",padding:"1px 6px",borderRadius:"10px",border:"1px solid #BFDBFE"}}>SF ✓</span>}
-          {isPresentacion&&client.stageDate&&(
-            <span style={{fontSize:"10px",color:D.ink3}}>
-              Pres. {formatDateShort(client.stageDate)}{closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
-            </span>
-          )}
-        </div>
-      )}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:client.nextAction?"8px":"0"}}>
-        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>MWp</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.mwp.toFixed(2)}</div></div>
-        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>Prob.</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div></div>
-      </div>
-      {client.nextAction&&<div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px",borderLeft:`2px solid ${D.border}`}}><div style={{fontSize:"10px",color:D.ink3,marginBottom:"2px"}}>Comentario</div><div style={{fontSize:"12px",color:D.ink2,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{client.nextAction}</div></div>}
-    </div>
-    {showDetail&&(
-      <Modal open={showDetail} title={`${client.companyName} — Reuniones y llamados`} onClose={()=>setShowDetail(false)} wide>
-        <ClientDetailModal client={client} transcripts={transcripts} onUpdateMeetings={(meetings)=>onUpdateMeetings(client.id,meetings)} onClose={()=>setShowDetail(false)}/>
-      </Modal>
-    )}
-    </>
-  );
-}
-
 // ─── Prospecto Row ─────────────────────────────────────────────────────────────
 function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
   const match=contacts.find(c=>c.company.toLowerCase()===client.companyName.toLowerCase());
