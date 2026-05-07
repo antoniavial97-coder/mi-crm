@@ -1227,19 +1227,37 @@ export default function Home(){
   },[activeClients]);
 
   async function exportToExcel(){
-    try{
-      const rows=(c:ClientRecord)=>[c.companyName,c.contactName,c.stage,c.subStage||"",c.mwp,c.closeProbabilityPct,c.nextAction,c.stageDate||"",c.salesforce?"Sí":"No",c.createdAtISO];
-      const header=["Empresa","Contacto","Etapa","Sub-etapa","MWp","Prob%","Comentario","Fecha etapa","Salesforce","Fecha ingreso"];
-      const pipeline=activeClients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
-      const prospectos=activeClients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo");
-      const perdidos=clients.filter(c=>c.stage==="Perdido");
-      const toCSV=(data:ClientRecord[])=>[header,...data.map(rows)].map(r=>r.map(v=>typeof v==="string"&&v.includes(",")? `"${v}"`:v).join(",")).join("\n");
-      const content=`Pipeline P1 y P2\n${toCSV(pipeline)}\n\nProspectos\n${toCSV(prospectos)}\n\nPerdidos\n${toCSV(perdidos)}`;
+    // Load SheetJS dynamically
+    await new Promise<void>((resolve,reject)=>{
+      if((window as unknown as Record<string,unknown>).XLSX){resolve();return;}
+      const s=document.createElement("script");
+      s.src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js";
+      s.onload=()=>resolve();s.onerror=()=>reject();
+      document.head.appendChild(s);
+    }).catch(()=>null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const XLSX=(window as any).XLSX;
+    const header=["Empresa","Contacto","Etapa","Sub-etapa","MWp","Prob%","Comentario","Fecha etapa","Salesforce","Fecha ingreso pipeline"];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const toRows=(arr:ClientRecord[])=>arr.map((c:ClientRecord)=>[c.companyName,c.contactName,c.stage,c.subStage||"",c.mwp,c.closeProbabilityPct,c.nextAction,c.stageDate||"",c.salesforce?"Sí":"No",c.ingressDate||""]);
+    const pipeline=activeClients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2");
+    const prospectos=activeClients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo");
+    const perdidos=clients.filter(c=>c.stage==="Perdido");
+    if(XLSX){
+      const wb=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([header,...toRows(pipeline)]),"Pipeline");
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([header,...toRows(prospectos)]),"Prospectos");
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([header,...toRows(perdidos)]),"Perdidos");
+      XLSX.writeFile(wb,`CRM_Solarity_${todayISO()}.xlsx`);
+    } else {
+      // Fallback CSV
+      const toCSV=(data:ClientRecord[])=>[header,...toRows(data)].map(r=>r.map(v=>typeof v==="string"&&String(v).includes(",")? `"${v}"`:v).join(",")).join("\n");
+      const content=`Pipeline\n${toCSV(pipeline)}\n\nProspectos\n${toCSV(prospectos)}\n\nPerdidos\n${toCSV(perdidos)}`;
       const blob=new Blob(["\ufeff"+content],{type:"text/csv;charset=utf-8;"});
       const url=URL.createObjectURL(blob);
       const a=document.createElement("a");a.href=url;a.download=`CRM_Solarity_${todayISO()}.csv`;a.click();
       URL.revokeObjectURL(url);
-    }catch(e){window.alert("Error al exportar");}
+    }
   }
 
   const perdidosCount=useMemo(()=>clients.filter(c=>c.stage==="Perdido").length,[clients]);
