@@ -336,28 +336,6 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   );
 }
 
-// ─── Sin Contacto Alert ──────────────────────────────────────────────────────
-const DIAS_ALERTA = 14;
-
-const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
-
-function setRecentContact(clientId:string){
-  try{
-    const raw=localStorage.getItem(RECENT_CONTACTS_KEY);
-    const data:Record<string,string>=raw?JSON.parse(raw):{};
-    data[clientId]=todayISO();
-    localStorage.setItem(RECENT_CONTACTS_KEY,JSON.stringify(data));
-  }catch{}
-}
-
-function getRecentContacts():Record<string,string>{
-  try{
-    const raw=localStorage.getItem(RECENT_CONTACTS_KEY);
-    return raw?JSON.parse(raw):{};
-  }catch{return {};}
-}
-
-
 const DIAS_ALERTA = 14;
 const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
 
