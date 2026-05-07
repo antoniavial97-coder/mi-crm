@@ -132,7 +132,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     id:x.id!,companyName:x.companyName??"",contactName:x.contactName??"",
     stage:(x.stage as Stage)??"Prospecto Pasivo",subStage:x.subStage as SubStage|undefined,
     mwp:typeof x.mwp==="number"?x.mwp:0,closeProbabilityPct:typeof x.closeProbabilityPct==="number"?x.closeProbabilityPct:0,
-    lastContactISO:"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),ingressDate:(x as Record<string,unknown>).ingressDate as string|undefined,
+    lastContactISO:(x as Record<string,unknown>).lastContactISO as string||"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),ingressDate:(x as Record<string,unknown>).ingressDate as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -1329,7 +1329,7 @@ export default function Home(){
       if(parsed.length>0){
         const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
         const localMap=new Map(local.map(c=>[c.companyName.toLowerCase(),c]));
-        const merged=parsed.map(c=>{const e=localMap.get(c.companyName.toLowerCase()); return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],createdAtISO:e.createdAtISO}:c;});
+        const merged=parsed.map(c=>{const e=localMap.get(c.companyName.toLowerCase()); return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:e.lastContactISO||"",createdAtISO:e.createdAtISO}:c;});
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
       }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
     }catch{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("error");}
