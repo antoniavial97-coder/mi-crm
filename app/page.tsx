@@ -1016,15 +1016,19 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
 function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
   const hoy=new Date();
   const lunesISO=useMemo(()=>{
-    const d=new Date(hoy);
-    const day=d.getDay();
-    const diff=day===0?-6:1-day;
-    d.setDate(d.getDate()+diff);
-    return d.toISOString().slice(0,10);
+    const d=new Date(hoy);const day=d.getDay();const diff=day===0?-6:1-day;
+    d.setDate(d.getDate()+diff);return d.toISOString().slice(0,10);
   },[]);
 
-  // Tareas IA pendientes ordenadas por urgencia
-  const tareas=useMemo(()=>{
+  const [miDiaTasks,setMiDiaTasks]=useState<DailyTask[]>([]);
+  useEffect(()=>{
+    const load=()=>{try{const raw=localStorage.getItem(MI_DIA_KEY);if(raw)setMiDiaTasks(JSON.parse(raw) as DailyTask[]);}catch{}};
+    load();
+    const iv=setInterval(load,2000);
+    return ()=>clearInterval(iv);
+  },[]);
+
+  const tareasIA=useMemo(()=>{
     const result:Array<{client:ClientRecord;task:ClientTask;urgencia:number}>=[];
     for(const client of clients.filter(c=>c.stage!=="Perdido")){
       for(const task of (client.aiTasks||[])){
@@ -1042,34 +1046,37 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
     return result.sort((a,b)=>b.urgencia-a.urgencia);
   },[clients]);
 
-  // Actividad de esta semana por cliente
-  const actividadSemana=useMemo(()=>{
-    let miDiaTasks:DailyTask[]=[];
-    try{const raw=localStorage.getItem(MI_DIA_KEY);if(raw)miDiaTasks=JSON.parse(raw) as DailyTask[];}catch{}
-    const tareasCompletadas=miDiaTasks.filter(t=>t.done&&t.date>=lunesISO&&t.clientId);
-    const porCliente:Array<{client:ClientRecord;actividades:Array<{tipo:string;fecha:string;nota:string}>}>=[];
+  const actividadPorCliente=useMemo(()=>{
+    const tareasComp=miDiaTasks.filter(t=>t.done&&t.date>=lunesISO&&t.clientId);
+    const tareasPend=miDiaTasks.filter(t=>!t.done&&t.clientId);
+    const porCliente:Array<{client:ClientRecord;acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>}>=[];
     for(const client of clients.filter(c=>c.stage!=="Perdido")){
-      const acts:Array<{tipo:string;fecha:string;nota:string}>=[];
+      const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
       for(const m of (client.meetings||[])){
-        if(m.date>=lunesISO){
-          acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,80)||""});
-        }
+        if(m.date>=lunesISO)acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,100)||""});
       }
       for(const t of transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())){
-        if(t.date>=lunesISO)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,80)||""});
+        if(t.date>=lunesISO)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,100)||""});
       }
-      for(const t of tareasCompletadas.filter(t=>t.clientId===client.id)){
+      for(const t of tareasComp.filter(t=>t.clientId===client.id)){
         acts.push({tipo:"✓ Tarea",fecha:t.date,nota:t.text});
       }
+      for(const t of tareasPend.filter(t=>t.clientId===client.id)){
+        acts.push({tipo:"⏳ Pendiente",fecha:t.date,nota:t.text,pendiente:true});
+      }
       if(acts.length>0){
-        porCliente.push({client,actividades:acts.sort((a,b)=>b.fecha.localeCompare(a.fecha))});
+        porCliente.push({client,acts:acts.sort((a,b)=>{
+          if(a.pendiente&&!b.pendiente)return 1;
+          if(!a.pendiente&&b.pendiente)return -1;
+          return b.fecha.localeCompare(a.fecha);
+        })});
       }
     }
     return porCliente.sort((a,b)=>{
       const ord:Record<string,number>={"Pipeline P1":0,"Pipeline P2":1,"Prospecto Activo":2,"Prospecto Pasivo":3,"Perdido":4};
       return (ord[a.client.stage]||0)-(ord[b.client.stage]||0);
     });
-  },[clients,transcripts,lunesISO]);
+  },[clients,transcripts,lunesISO,miDiaTasks]);
 
   function toggleTask(clientId:string,taskId:string){
     const client=clients.find(c=>c.id===clientId);
@@ -1080,32 +1087,32 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
-      {/* Lo que hice esta semana */}
       <div>
         <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
           <div style={{width:"3px",height:"14px",borderRadius:"2px",background:"#16a34a"}}/>
-          Lo que hice esta semana
-          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>desde el {formatDateShort(lunesISO)}</span>
+          Actividad semanal por cliente
+          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>semana del {formatDateShort(lunesISO)}</span>
         </div>
-        {actividadSemana.length===0?(
+        {actividadPorCliente.length===0?(
           <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>
-            Sin actividad registrada esta semana — las reuniones y llamados que agregues en cada cliente aparecerán acá
+            Sin actividad esta semana — reuniones, llamados y tareas completadas aparecerán acá
           </div>
         ):(
-          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-            {actividadSemana.map(({client,actividades})=>(
-              <div key={client.id} style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",padding:"12px 14px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"8px"}}>
-                  <span style={{fontSize:"12px",fontWeight:600,color:D.ink}}>{client.companyName}</span>
-                  <span style={{fontSize:"10px",color:D.accent,background:`${D.accent}12`,padding:"1px 7px",borderRadius:"10px",fontWeight:500}}>{client.stage}</span>
+          <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+            {actividadPorCliente.map(({client,acts})=>(
+              <div key={client.id} style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"14px",padding:"12px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"}}>
+                  <span style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.companyName}</span>
+                  <span style={{fontSize:"10px",color:client.stage==="Pipeline P1"?D.accent:"#7C3AED",background:client.stage==="Pipeline P1"?`${D.accent}12`:"#F5F3FF",padding:"1px 7px",borderRadius:"10px",fontWeight:500}}>{client.stage}</span>
                   {client.subStage&&<span style={{fontSize:"10px",color:D.ink3}}>{client.subStage}</span>}
+                  <span style={{marginLeft:"auto",fontSize:"10px",color:D.ink3}}>{acts.length} interacción{acts.length!==1?"es":""}</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
-                  {actividades.map((a,i)=>(
-                    <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",color:D.ink2,padding:"4px 8px",background:D.bg,borderRadius:"6px"}}>
-                      <span style={{flexShrink:0,fontWeight:500}}>{a.tipo}</span>
-                      <span style={{color:D.ink3,flexShrink:0}}>{formatDateShort(a.fecha)}</span>
-                      {a.nota&&<span style={{color:D.ink2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{a.nota}</span>}
+                  {acts.map((a,i)=>(
+                    <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"5px 8px",background:a.pendiente?"#FFFBEB":D.bg,borderRadius:"6px",border:a.pendiente?"1px solid #FDE68A":"none",alignItems:"flex-start"}}>
+                      <span style={{flexShrink:0,fontWeight:600,color:a.pendiente?"#d97706":a.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"90px"}}>{a.tipo}</span>
+                      <span style={{color:D.ink3,flexShrink:0,minWidth:"70px"}}>{formatDateShort(a.fecha)}</span>
+                      {a.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.4}}>{a.nota}</span>}
                     </div>
                   ))}
                 </div>
@@ -1115,26 +1122,24 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
         )}
       </div>
 
-      {/* Tareas IA pendientes */}
       <div>
         <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
           <div style={{width:"3px",height:"14px",borderRadius:"2px",background:D.accent}}/>
-          Tareas pendientes
-          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>generadas por IA</span>
+          Tareas IA pendientes
         </div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px",marginBottom:"12px"}}>
-          {[{l:"Pendientes",v:tareas.length,accent:true},{l:"Completadas",v:clients.reduce((s,c)=>(c.aiTasks||[]).filter(t=>t.done).length+s,0)},{l:"Clientes con tareas",v:new Set(tareas.map(t=>t.client.id)).size}].map((m,i)=>(
-            <div key={i} style={{background:D.white,border:`1px solid ${m.accent?`${D.accent}44`:D.border}`,borderRadius:"12px",padding:"10px 14px",borderLeft:m.accent?`3px solid ${D.accent}`:"none"}}>
+          {[{l:"Pendientes",v:tareasIA.length,accent:true},{l:"Seguimientos vencidos",v:tareasIA.filter(t=>t.task.followUp&&!t.task.followUp.done&&isPast(t.task.followUp.dueDateISO)).length},{l:"Clientes con tareas",v:new Set(tareasIA.map(t=>t.client.id)).size}].map((m,i)=>(
+            <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean}).accent?`${D.accent}44`:D.border}`,borderRadius:"12px",padding:"10px 14px",borderLeft:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:"none"}}>
               <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"4px"}}>{m.l}</div>
-              <div style={{fontSize:"20px",fontWeight:700,color:m.accent?D.accent:D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
+              <div style={{fontSize:"20px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
             </div>
           ))}
         </div>
-        {tareas.length===0?(
-          <div style={{textAlign:"center",padding:"2rem",color:D.ink3,fontSize:"13px",border:`1px dashed ${D.border}`,borderRadius:"14px"}}>🎉 Sin tareas pendientes — generá acciones con IA en Pipeline P1</div>
+        {tareasIA.length===0?(
+          <div style={{textAlign:"center",padding:"2rem",color:D.ink3,fontSize:"13px",border:`1px dashed ${D.border}`,borderRadius:"14px"}}>🎉 Sin tareas IA pendientes</div>
         ):(
           <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-            {tareas.map(({client,task,urgencia},i)=>(
+            {tareasIA.map(({client,task,urgencia},i)=>(
               <div key={i} style={{background:D.white,border:`1px solid ${urgencia>=100?D.alarmBorder:D.border}`,borderRadius:"12px",padding:"12px 14px",display:"flex",gap:"12px",alignItems:"flex-start"}}>
                 <input type="checkbox" checked={false} onChange={()=>toggleTask(client.id,task.id)} style={{marginTop:"2px",accentColor:D.accent,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
@@ -1155,6 +1160,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
     </div>
   );
 }
+
 function FiltrosPipeline({subStages,onFilter}:{subStages:SubStage[];onFilter:(f:{subStage:string;minMwp:number;soloSf:boolean})=>void}){
   const [subStage,setSubStage]=useState("");
   const [minMwp,setMinMwp]=useState(0);
