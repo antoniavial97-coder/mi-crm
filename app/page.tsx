@@ -1019,6 +1019,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
     const d=new Date(hoy);const day=d.getDay();const diff=day===0?-6:1-day;
     d.setDate(d.getDate()+diff);return d.toISOString().slice(0,10);
   },[]);
+  const hace14=useMemo(()=>{const d=new Date();d.setDate(d.getDate()-14);return d.toISOString().slice(0,10);},[]);
 
   const [miDiaTasks,setMiDiaTasks]=useState<DailyTask[]>([]);
   useEffect(()=>{
@@ -1053,15 +1054,15 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
     for(const client of clients.filter(c=>c.stage!=="Perdido")){
       const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
       for(const m of (client.meetings||[])){
-        if(m.date>=lunesISO)acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,100)||""});
+        if(m.date>=hace14)acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,100)||""});
       }
       for(const t of transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())){
-        if(t.date>=lunesISO)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,100)||""});
+        if(t.date>=hace14)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,100)||""});
       }
-      for(const t of tareasComp.filter(t=>t.clientId===client.id)){
+      for(const t of tareasComp.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
         acts.push({tipo:"✓ Tarea",fecha:t.date,nota:t.text});
       }
-      for(const t of tareasPend.filter(t=>t.clientId===client.id)){
+      for(const t of tareasPend.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
         acts.push({tipo:"⏳ Pendiente",fecha:t.date,nota:t.text,pendiente:true});
       }
       if(acts.length>0){
