@@ -351,9 +351,20 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
   const fechas:Date[]=[];
   if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
   if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
-  // Usar nombre empresa como clave (más estable que el id que cambia con cada sync)
+  // Leer recentContacts por nombre empresa
   const key=c.companyName.toLowerCase();
-  if(recentContacts[key]){const d=new Date(recentContacts[key]);if(!isNaN(d.getTime()))fechas.push(d);}
+  const recentAll={...recentContacts,...getRecentContacts()};
+  if(recentAll[key]){const d=new Date(recentAll[key]);if(!isNaN(d.getTime()))fechas.push(d);}
+  // Leer tareas completadas de Mi día directamente del localStorage
+  try{
+    const raw=localStorage.getItem(MI_DIA_KEY);
+    if(raw){
+      const tasks=JSON.parse(raw) as DailyTask[];
+      for(const t of tasks.filter(t=>t.done&&t.clientId===c.id||t.done&&t.clientName?.toLowerCase()===key)){
+        const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);
+      }
+    }
+  }catch{}
   for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
   for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
   if(fechas.length===0)return null;
@@ -373,6 +384,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   const [localRecent,setLocalRecent]=useState<Record<string,string>>(()=>{
     try{return getRecentContacts();}catch{return {};}
   });
+  const [alertTick,setAlertTick]=useState(0);
   const hoy=todayISO();
 
   useEffect(()=>{
@@ -396,7 +408,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
       })
       .filter(x=>x.dias>=DIAS_ALERTA)
       .sort((a,b)=>b.dias-a.dias);
-  },[clients,transcripts,recentContacts,localRecent]);
+  },[clients,transcripts,recentContacts,localRecent,alertTick]);
 
   function markContact(clientId:string){
     const client=clients.find(c=>c.id===clientId);
@@ -404,6 +416,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
     const key=client.companyName.toLowerCase();
     saveRecentContact(key,hoy);
     setLocalRecent(prev=>({...prev,[key]:hoy}));
+    setAlertTick(t=>t+1);
     onMarkContact(clientId);
   }
 
