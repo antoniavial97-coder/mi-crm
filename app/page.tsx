@@ -1048,7 +1048,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
   },[clients]);
 
   const actividadPorCliente=useMemo(()=>{
-    const tareasComp=miDiaTasks.filter(t=>t.done&&t.date>=lunesISO&&t.clientId);
+    const tareasComp=miDiaTasks.filter(t=>t.done&&t.date>=hace14&&t.clientId);
     const tareasPend=miDiaTasks.filter(t=>!t.done&&t.clientId);
     const porCliente:Array<{client:ClientRecord;acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>}>=[];
     for(const client of clients.filter(c=>c.stage!=="Perdido")){
@@ -1554,7 +1554,7 @@ export default function Home(){
   const tareasCount=useMemo(()=>activeClients.reduce((s,c)=>(c.aiTasks||[]).filter(t=>!t.done).length+s,0),[activeClients]);
   const tabs:[Tab,string][]=[
     ["dashboard","Dashboard"],
-    ["semana",`Mi semana${tareasCount>0?` (${tareasCount})`:""}` ],
+    ["semana","Actividades"],
     ["pipeline1","Pipeline P1"],
     ["pipeline2","Pipeline P2"],
     ["prospectos","Prospectos"],
