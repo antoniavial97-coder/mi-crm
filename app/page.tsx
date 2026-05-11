@@ -1070,13 +1070,12 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
           acts.push({tipo:"⏳ Pendiente",fecha:t.date,nota:t.text,pendiente:true});
         }
       }
-      if(acts.length>0){
-        porCliente.push({client,acts:acts.sort((a,b)=>{
-          if(a.pendiente&&!b.pendiente)return 1;
-          if(!a.pendiente&&b.pendiente)return -1;
-          return b.fecha.localeCompare(a.fecha);
-        })});
-      }
+      // Siempre incluir el cliente, con o sin actividad
+      porCliente.push({client,acts:acts.sort((a,b)=>{
+        if(a.pendiente&&!b.pendiente)return 1;
+        if(!a.pendiente&&b.pendiente)return -1;
+        return b.fecha.localeCompare(a.fecha);
+      })});
     }
     return porCliente.sort((a,b)=>{
       const ord:Record<string,number>={"Pipeline P1":0,"Pipeline P2":1,"Prospecto Activo":2};
@@ -1127,11 +1126,11 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
         <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
           <div style={{width:"3px",height:"14px",borderRadius:"2px",background:"#16a34a"}}/>
           {monthLabel(mesSel)}
-          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>· {actividadMes.length} clientes con actividad</span>
+          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>· {actividadMes.filter(x=>x.acts.length>0).length} con actividad · {actividadMes.length} total</span>
         </div>
         {actividadMes.length===0?(
           <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>
-            Sin actividad registrada en {monthLabel(mesSel)}
+            Sin clientes en pipeline este mes
           </div>
         ):(
           <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
@@ -1141,9 +1140,14 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
                   <span style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.companyName}</span>
                   <span style={{fontSize:"10px",color:client.stage==="Pipeline P1"?D.accent:client.stage==="Pipeline P2"?"#7C3AED":"#16a34a",background:client.stage==="Pipeline P1"?`${D.accent}12`:client.stage==="Pipeline P2"?"#F5F3FF":"#F0FBF4",padding:"1px 7px",borderRadius:"10px",fontWeight:500}}>{client.stage}</span>
                   {client.subStage&&<span style={{fontSize:"10px",color:D.ink3}}>{client.subStage}</span>}
-                  <span style={{marginLeft:"auto",fontSize:"10px",color:D.ink3,fontWeight:500}}>{acts.filter(a=>!a.pendiente).length} actividad{acts.filter(a=>!a.pendiente).length!==1?"es":""}</span>
+                  <span style={{marginLeft:"auto",fontSize:"10px",color:acts.filter(a=>!a.pendiente).length===0?"#dc2626":D.ink3,fontWeight:500}}>
+                    {acts.filter(a=>!a.pendiente).length===0?"Sin actividad":`${acts.filter(a=>!a.pendiente).length} actividad${acts.filter(a=>!a.pendiente).length!==1?"es":""}`}
+                  </span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
+                  {acts.length===0&&(
+                    <div style={{fontSize:"11px",color:D.ink3,fontStyle:"italic",padding:"4px 8px"}}>Sin actividad registrada este mes</div>
+                  )}
                   {acts.map((a,i)=>(
                     <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"6px 10px",background:a.pendiente?"#FFFBEB":D.bg,borderRadius:"8px",border:a.pendiente?"1px solid #FDE68A":"none",alignItems:"flex-start"}}>
                       <span style={{flexShrink:0,fontWeight:600,color:a.pendiente?"#d97706":a.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"110px"}}>{a.tipo}</span>
@@ -1495,7 +1499,16 @@ export default function Home(){
   useEffect(()=>{if(sheetStatus!=="idle")localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));},[clients,sheetStatus]);
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
-  function updateClientMeetings(clientId:string,meetings:Meeting[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));}
+  function updateClientMeetings(clientId:string,meetings:Meeting[]){
+    setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));
+    // Marcar como contacto reciente usando nombre empresa
+    const client=clients.find(c=>c.id===clientId);
+    if(client){
+      const key=client.companyName.toLowerCase();
+      saveRecentContact(key,todayISO());
+      setRecentContacts(prev=>({...prev,[key]:todayISO()}));
+    }
+  }
   function updateClientLastContact(clientId:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,lastContactISO:todayISO(),updatedAtISO:todayISO()}:c));}
   function markRecentContact(clientId:string){
     const client=clients.find(c=>c.id===clientId)||activeClients.find(c=>c.id===clientId);
