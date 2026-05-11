@@ -1015,20 +1015,76 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
 // --- Semana Tab ---------------------------------------------------------------
 function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
   const hoy=new Date();
-  const lunesISO=useMemo(()=>{
-    const d=new Date(hoy);const day=d.getDay();const diff=day===0?-6:1-day;
-    d.setDate(d.getDate()+diff);return d.toISOString().slice(0,10);
-  },[]);
-  const hace14=useMemo(()=>{const d=new Date();d.setDate(d.getDate()-14);return d.toISOString().slice(0,10);},[]);
+  const mesActual=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
+  const [mesSel,setMesSel]=useState(mesActual);
 
   const [miDiaTasks,setMiDiaTasks]=useState<DailyTask[]>([]);
   useEffect(()=>{
     const load=()=>{try{const raw=localStorage.getItem(MI_DIA_KEY);if(raw)setMiDiaTasks(JSON.parse(raw) as DailyTask[]);}catch{}};
-    load();
-    const iv=setInterval(load,2000);
-    return ()=>clearInterval(iv);
+    load();const iv=setInterval(load,3000);return ()=>clearInterval(iv);
   },[]);
 
+  // Meses disponibles: mar 2026 hasta mes actual
+  const meses=useMemo(()=>{
+    const m:string[]=[];
+    let y=2026,mo=3;
+    const nowY=hoy.getFullYear(),nowMo=hoy.getMonth()+1;
+    while(y<nowY||(y===nowY&&mo<=nowMo)){
+      m.push(`${y}-${String(mo).padStart(2,"0")}`);
+      mo++;if(mo>12){mo=1;y++;}
+    }
+    return m.reverse(); // más reciente primero
+  },[]);
+
+  // Actividad por cliente para el mes seleccionado
+  const actividadMes=useMemo(()=>{
+    const desde=`${mesSel}-01`;
+    const hasta=`${mesSel}-31`;
+    const tareasComp=miDiaTasks.filter(t=>t.done&&t.date>=desde&&t.date<=hasta&&t.clientId);
+    const tareasPend=miDiaTasks.filter(t=>!t.done&&t.clientId);
+    const porCliente:Array<{client:ClientRecord;acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>}>=[];
+
+    const clientesFiltrados=clients.filter(c=>
+      c.stage==="Pipeline P1"||c.stage==="Pipeline P2"||c.stage==="Prospecto Activo"
+    );
+
+    for(const client of clientesFiltrados){
+      const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
+      // Meetings manuales del mes
+      for(const m of (client.meetings||[])){
+        if(m.date>=desde&&m.date<=hasta){
+          acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||""});
+        }
+      }
+      // Diio del mes
+      for(const t of transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())){
+        if(t.date>=desde&&t.date<=hasta)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,120)||""});
+      }
+      // Tareas completadas del mes
+      for(const t of tareasComp.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
+        acts.push({tipo:"✓ Tarea",fecha:t.date,nota:t.text});
+      }
+      // Tareas pendientes (solo mes actual)
+      if(mesSel===mesActual){
+        for(const t of tareasPend.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
+          acts.push({tipo:"⏳ Pendiente",fecha:t.date,nota:t.text,pendiente:true});
+        }
+      }
+      if(acts.length>0){
+        porCliente.push({client,acts:acts.sort((a,b)=>{
+          if(a.pendiente&&!b.pendiente)return 1;
+          if(!a.pendiente&&b.pendiente)return -1;
+          return b.fecha.localeCompare(a.fecha);
+        })});
+      }
+    }
+    return porCliente.sort((a,b)=>{
+      const ord:Record<string,number>={"Pipeline P1":0,"Pipeline P2":1,"Prospecto Activo":2};
+      return (ord[a.client.stage]||0)-(ord[b.client.stage]||0);
+    });
+  },[clients,transcripts,miDiaTasks,mesSel,mesActual]);
+
+  // Tareas IA pendientes
   const tareasIA=useMemo(()=>{
     const result:Array<{client:ClientRecord;task:ClientTask;urgencia:number}>=[];
     for(const client of clients.filter(c=>c.stage!=="Perdido")){
@@ -1047,38 +1103,6 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
     return result.sort((a,b)=>b.urgencia-a.urgencia);
   },[clients]);
 
-  const actividadPorCliente=useMemo(()=>{
-    const tareasComp=miDiaTasks.filter(t=>t.done&&t.date>=hace14&&t.clientId);
-    const tareasPend=miDiaTasks.filter(t=>!t.done&&t.clientId);
-    const porCliente:Array<{client:ClientRecord;acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>}>=[];
-    for(const client of clients.filter(c=>c.stage!=="Perdido")){
-      const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
-      for(const m of (client.meetings||[])){
-        if(m.date>=hace14)acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,100)||""});
-      }
-      for(const t of transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())){
-        if(t.date>=hace14)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,100)||""});
-      }
-      for(const t of tareasComp.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
-        acts.push({tipo:"✓ Tarea",fecha:t.date,nota:t.text});
-      }
-      for(const t of tareasPend.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
-        acts.push({tipo:"⏳ Pendiente",fecha:t.date,nota:t.text,pendiente:true});
-      }
-      if(acts.length>0){
-        porCliente.push({client,acts:acts.sort((a,b)=>{
-          if(a.pendiente&&!b.pendiente)return 1;
-          if(!a.pendiente&&b.pendiente)return -1;
-          return b.fecha.localeCompare(a.fecha);
-        })});
-      }
-    }
-    return porCliente.sort((a,b)=>{
-      const ord:Record<string,number>={"Pipeline P1":0,"Pipeline P2":1,"Prospecto Activo":2,"Prospecto Pasivo":3,"Perdido":4};
-      return (ord[a.client.stage]||0)-(ord[b.client.stage]||0);
-    });
-  },[clients,transcripts,lunesISO,miDiaTasks]);
-
   function toggleTask(clientId:string,taskId:string){
     const client=clients.find(c=>c.id===clientId);
     if(!client)return;
@@ -1088,32 +1112,43 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
+
+      {/* Selector de mes */}
+      <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+        {meses.map(m=>(
+          <button key={m} onClick={()=>setMesSel(m)} style={{padding:"5px 14px",borderRadius:"20px",border:`1px solid ${m===mesSel?D.accent:D.border}`,background:m===mesSel?D.accent:D.white,color:m===mesSel?D.white:D.ink2,fontSize:"12px",fontWeight:m===mesSel?600:400,cursor:"pointer",transition:"all 0.15s"}}>
+            {monthLabel(m)}
+          </button>
+        ))}
+      </div>
+
+      {/* Actividad del mes por cliente */}
       <div>
         <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
           <div style={{width:"3px",height:"14px",borderRadius:"2px",background:"#16a34a"}}/>
-          Actividad semanal por cliente
-          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>semana del {formatDateShort(lunesISO)}</span>
+          {monthLabel(mesSel)}
+          <span style={{fontSize:"11px",color:D.ink3,fontWeight:400}}>· {actividadMes.length} clientes con actividad</span>
         </div>
-        {actividadPorCliente.length===0?(
+        {actividadMes.length===0?(
           <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>
-            Sin actividad esta semana — reuniones, llamados y tareas completadas aparecerán acá
+            Sin actividad registrada en {monthLabel(mesSel)}
           </div>
         ):(
           <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
-            {actividadPorCliente.map(({client,acts})=>(
-              <div key={client.id} style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"14px",padding:"12px 16px"}}>
+            {actividadMes.map(({client,acts})=>(
+              <div key={client.id} style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"14px",padding:"14px 16px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"10px"}}>
                   <span style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.companyName}</span>
-                  <span style={{fontSize:"10px",color:client.stage==="Pipeline P1"?D.accent:"#7C3AED",background:client.stage==="Pipeline P1"?`${D.accent}12`:"#F5F3FF",padding:"1px 7px",borderRadius:"10px",fontWeight:500}}>{client.stage}</span>
+                  <span style={{fontSize:"10px",color:client.stage==="Pipeline P1"?D.accent:client.stage==="Pipeline P2"?"#7C3AED":"#16a34a",background:client.stage==="Pipeline P1"?`${D.accent}12`:client.stage==="Pipeline P2"?"#F5F3FF":"#F0FBF4",padding:"1px 7px",borderRadius:"10px",fontWeight:500}}>{client.stage}</span>
                   {client.subStage&&<span style={{fontSize:"10px",color:D.ink3}}>{client.subStage}</span>}
-                  <span style={{marginLeft:"auto",fontSize:"10px",color:D.ink3}}>{acts.length} interacción{acts.length!==1?"es":""}</span>
+                  <span style={{marginLeft:"auto",fontSize:"10px",color:D.ink3,fontWeight:500}}>{acts.filter(a=>!a.pendiente).length} actividad{acts.filter(a=>!a.pendiente).length!==1?"es":""}</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
                   {acts.map((a,i)=>(
-                    <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"5px 8px",background:a.pendiente?"#FFFBEB":D.bg,borderRadius:"6px",border:a.pendiente?"1px solid #FDE68A":"none",alignItems:"flex-start"}}>
-                      <span style={{flexShrink:0,fontWeight:600,color:a.pendiente?"#d97706":a.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"90px"}}>{a.tipo}</span>
-                      <span style={{color:D.ink3,flexShrink:0,minWidth:"70px"}}>{formatDateShort(a.fecha)}</span>
-                      {a.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.4}}>{a.nota}</span>}
+                    <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"6px 10px",background:a.pendiente?"#FFFBEB":D.bg,borderRadius:"8px",border:a.pendiente?"1px solid #FDE68A":"none",alignItems:"flex-start"}}>
+                      <span style={{flexShrink:0,fontWeight:600,color:a.pendiente?"#d97706":a.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"110px"}}>{a.tipo}</span>
+                      <span style={{color:D.ink3,flexShrink:0,minWidth:"75px"}}>{formatDateShort(a.fecha)}</span>
+                      {a.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.5}}>{a.nota}</span>}
                     </div>
                   ))}
                 </div>
@@ -1123,18 +1158,11 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
         )}
       </div>
 
+      {/* Tareas IA pendientes */}
       <div>
         <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
           <div style={{width:"3px",height:"14px",borderRadius:"2px",background:D.accent}}/>
           Tareas IA pendientes
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px",marginBottom:"12px"}}>
-          {[{l:"Pendientes",v:tareasIA.length,accent:true},{l:"Seguimientos vencidos",v:tareasIA.filter(t=>t.task.followUp&&!t.task.followUp.done&&isPast(t.task.followUp.dueDateISO)).length},{l:"Clientes con tareas",v:new Set(tareasIA.map(t=>t.client.id)).size}].map((m,i)=>(
-            <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean}).accent?`${D.accent}44`:D.border}`,borderRadius:"12px",padding:"10px 14px",borderLeft:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:"none"}}>
-              <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"4px"}}>{m.l}</div>
-              <div style={{fontSize:"20px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
-            </div>
-          ))}
         </div>
         {tareasIA.length===0?(
           <div style={{textAlign:"center",padding:"2rem",color:D.ink3,fontSize:"13px",border:`1px dashed ${D.border}`,borderRadius:"14px"}}>🎉 Sin tareas IA pendientes</div>
