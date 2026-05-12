@@ -1229,7 +1229,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
       porCliente.push({client,acts:acts.sort((a,b)=>{
         if(a.pendiente&&!b.pendiente)return 1;
         if(!a.pendiente&&b.pendiente)return -1;
-        return b.fecha.localeCompare(a.fecha);
+        return a.fecha.localeCompare(b.fecha); // más antigua primero
       })});
     }
     return porCliente.sort((a,b)=>{
