@@ -254,6 +254,8 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
 // --- Dashboard Panels (Sin Contacto + Mi Día) --------------------------------
 function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,onMarkContact,recentContacts,alertOnly}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;alertOnly?:boolean}){
   const [miDiaOpen,setMiDiaOpen]=useState(false);
+  const [aiSuggestions,setAiSuggestions]=useState<Array<{text:string;clientName:string;urgencia:string}>>([]);
+  const [loadingSugg,setLoadingSugg]=useState(false);
   const [alertOpen,setAlertOpen]=useState(false);
   const [tasks,setTasks]=useState<DailyTask[]>([]);
   const [input,setInput]=useState("");
@@ -310,6 +312,55 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   function assignClient(taskId:string,clientId:string){const client=clients.find(c=>c.id===clientId);setTasks(prev=>prev.map(t=>t.id===taskId?{...t,clientId:client?.id,clientName:client?.companyName}:t));setEditingClientFor(null);}
   function deleteTask(id:string){setTasks(prev=>prev.filter(t=>t.id!==id));}
   function clearCompleted(){setTasks(prev=>prev.filter(t=>!t.done));}
+
+  async function generateAISuggestions(){
+    setLoadingSugg(true);setAiSuggestions([]);
+    const activeClients=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2"||c.stage==="Prospecto Activo");
+    const allSuggestions:Array<{text:string;clientName:string;urgencia:number}>=[];
+    for(const client of activeClients){
+      const clientTranscripts=transcripts
+        .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
+        .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
+        .map(t=>`[Diio ${t.date}] ${t.transcript?.substring(0,400)||""}`);
+      const meetings=(client.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
+        .map(m=>`[${m.type} ${m.date}${m.subject?" "+m.subject:""}] ${m.notes?.substring(0,200)||""}`);
+      const completedTasks=tasks.filter(t=>t.done&&(t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase()))
+        .map(t=>t.text);
+      const pendingTasks=tasks.filter(t=>!t.done&&(t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase()))
+        .map(t=>t.text);
+      const context=[...clientTranscripts,...meetings,...completedTasks];
+      if(context.length===0&&!client.nextAction)continue;
+      // Urgencia: más actividad reciente = más urgente
+      const urgencia=clientTranscripts.length*3+meetings.length*2+(client.stage==="Pipeline P1"?5:client.stage==="Pipeline P2"?3:1);
+      try{
+        const res=await fetch("/api/generate-actions",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            company:client.companyName,
+            stage:`${client.stage}${client.subStage?" - "+client.subStage:""}`,
+            comment:`Basándote en el historial, sugiere acciones comerciales específicas y urgentes. Tareas ya pendientes: ${pendingTasks.join(", ")||"ninguna"}. Solo sugiere lo realmente necesario ahora. Sé breve y concreto. Incluye el nombre del cliente en cada tarea.`,
+            transcripts:context
+          })
+        });
+        const data=await res.json() as {tasks?:string[]};
+        for(const t of (data.tasks||[])){
+          allSuggestions.push({text:t,clientName:client.companyName,urgencia});
+        }
+      }catch{}
+    }
+    // Ordenar por urgencia descendente
+    allSuggestions.sort((a,b)=>b.urgencia-a.urgencia);
+    setAiSuggestions(allSuggestions.map(s=>({text:s.text,clientName:s.clientName,urgencia:s.urgencia>8?"Alta":s.urgencia>4?"Media":"Baja"})));
+    setLoadingSugg(false);
+  }
+
+  function addSuggestion(sugg:{text:string;clientName:string;urgencia:string}){
+    const client=clients.find(c=>c.companyName===sugg.clientName);
+    const newTask:DailyTask={id:newId(),text:sugg.text,done:false,date:hoy,clientId:client?.id,clientName:sugg.clientName};
+    setTasks(prev=>[...prev,newTask]);
+    setAiSuggestions(prev=>prev.filter(s=>s.text!==sugg.text));
+  }
 
   const pendientes=tasks.filter(t=>!t.done);
   const completadas=tasks.filter(t=>t.done);
@@ -400,8 +451,40 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
             </div>
             {pendientesDeAyer.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>{pendientesDeAyer.map(renderTask)}</div>)}
             {pendientesDeHoy.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Hoy</div>{pendientesDeHoy.map(renderTask)}</div>)}
-            {completadas.length>0&&(<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div><button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer"}}>Limpiar</button></div>{completadas.map(renderTask)}</div>)}
-            {tasks.length===0&&<div style={{textAlign:"center",padding:"1.5rem",color:D.ink3,fontSize:"12px"}}>Sin tareas para hoy</div>}
+            {completadas.length>0&&(<div style={{marginBottom:"10px"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div><button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer"}}>Limpiar</button></div>{completadas.map(renderTask)}</div>)}
+
+            {/* Sugerencias IA */}
+            {aiSuggestions.length>0&&(
+              <div style={{marginBottom:"10px"}}>
+                <div style={{fontSize:"10px",fontWeight:600,color:"#7C3AED",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px",display:"flex",justifyContent:"space-between"}}>
+                  <span>✦ Sugerencias IA — click para agregar</span>
+                  <button onClick={()=>setAiSuggestions([])} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer",fontWeight:400}}>Descartar</button>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:"5px"}}>
+                  {aiSuggestions.map((s,i)=>(
+                    <div key={i} onClick={()=>addSuggestion(s)} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"8px 10px",background:"#F5F3FF",borderRadius:"8px",border:"1px solid #DDD6FE",cursor:"pointer",transition:"background 0.1s"}}
+                      onMouseEnter={e=>(e.currentTarget.style.background="#EDE9FE")}
+                      onMouseLeave={e=>(e.currentTarget.style.background="#F5F3FF")}>
+                      <span style={{fontSize:"14px",color:"#7C3AED",flexShrink:0}}>＋</span>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:"12px",color:"#1A1A1A",lineHeight:1.4}}>{s.text}</div>
+                        <div style={{display:"flex",gap:"6px",marginTop:"3px",alignItems:"center"}}>
+                          <span style={{fontSize:"10px",color:"#7C3AED",background:"white",padding:"1px 6px",borderRadius:"8px",border:"1px solid #DDD6FE"}}>{s.clientName}</span>
+                          <span style={{fontSize:"9px",color:s.urgencia==="Alta"?"#dc2626":s.urgencia==="Media"?"#d97706":"#16a34a",fontWeight:600}}>{s.urgencia} urgencia</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Botón sugerir con IA */}
+            <button onClick={generateAISuggestions} disabled={loadingSugg} style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1px solid #DDD6FE",background:loadingSugg?"#F5F3FF":"white",fontSize:"12px",cursor:loadingSugg?"default":"pointer",color:"#7C3AED",fontWeight:500,marginBottom:"6px",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px"}}>
+              {loadingSugg?"⏳ Analizando pipeline...":"✦ Sugerir tareas con IA"}
+            </button>
+
+            {tasks.length===0&&aiSuggestions.length===0&&<div style={{textAlign:"center",padding:"1rem",color:D.ink3,fontSize:"12px"}}>Sin tareas para hoy</div>}
           </div>
         )}
       </div>
