@@ -617,9 +617,7 @@ function TareasPanel({client,onUpdateTasks,transcripts}:{client:ClientRecord;onU
       .filter(t=>!t.done)
       .map(t=>t.text);
 
-    const context=[...clientTranscripts,...meetings,...completedTasks].join("
-
-");
+    const context=[...clientTranscripts,...meetings,...completedTasks].join("\n\n");
 
     try{
       const res=await fetch("/api/generate-actions",{
