@@ -156,7 +156,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
     meetings:Array.isArray((x as Record<string,unknown>).meetings)
-      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado"|"correo")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio)}))
+      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado"|"correo")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio),pending:Boolean(m.pending)}))
       :[],
     createdAtISO:typeof x.createdAtISO==="string"?x.createdAtISO:todayISO(),
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
@@ -1030,12 +1030,15 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
   const meses=useMemo(()=>{
     const m:string[]=[];
     let y=2026,mo=3;
-    const nowY=hoy.getFullYear(),nowMo=hoy.getMonth()+1;
-    while(y<nowY||(y===nowY&&mo<=nowMo)){
+    // Incluir hasta 3 meses en el futuro para ver reuniones agendadas
+    const futureDate=new Date(hoy);
+    futureDate.setMonth(futureDate.getMonth()+3);
+    const endY=futureDate.getFullYear(),endMo=futureDate.getMonth()+1;
+    while(y<endY||(y===endY&&mo<=endMo)){
       m.push(`${y}-${String(mo).padStart(2,"0")}`);
       mo++;if(mo>12){mo=1;y++;}
     }
-    return m.reverse(); // más reciente primero
+    return m.reverse();
   },[]);
 
   // Actividad por cliente para el mes seleccionado
@@ -1052,9 +1055,10 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
 
     for(const client of clientesFiltrados){
       const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
-      // Meetings del mes (realizados y agendados)
+      // Meetings del mes (realizados, agendados futuros y correos)
       for(const m of (client.meetings||[])){
-        if(m.date>=desde&&m.date<=hasta){
+        const meetingMonth=m.date.substring(0,7); // YYYY-MM
+        if(meetingMonth===mesSel){
           const tipo=m.pending?"🗓 Agendado":m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo";
           acts.push({tipo,fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||"",pendiente:!!m.pending});
         }
