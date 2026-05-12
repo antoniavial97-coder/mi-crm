@@ -123,7 +123,25 @@ function parseTranscriptsCSV(csv:string):TranscriptInfo[]{
     const cols=parseCSVLine(line);
     const get=(i:number)=>(i>=0?(cols[i]??"").trim():"");
     const company=get(idx.company); if(!company)return null;
-    return {company,date:get(idx.date),transcript:get(idx.transcript)};
+    // Normalizar fecha DD/MM/YYYY o DD-MM-YYYY → YYYY-MM-DD
+    let fecha=get(idx.date);
+    if(fecha){
+      const sepSlash=fecha.includes("/");
+      const sepDash=fecha.includes("-")&&!fecha.match(/^\d{4}-/); // tiene guion pero NO empieza con año
+      if(sepSlash||sepDash){
+        const p=fecha.split(sepSlash?"/":"-");
+        if(p.length===3){
+          if(p[2].length===4){
+            // DD/MM/YYYY o DD-MM-YYYY → YYYY-MM-DD
+            fecha=`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;
+          } else if(p[0].length===4){
+            // YYYY/MM/DD → YYYY-MM-DD
+            fecha=`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`;
+          }
+        }
+      }
+    }
+    return {company,date:fecha,transcript:get(idx.transcript)};
   }).filter(Boolean) as TranscriptInfo[];
 }
 
@@ -1052,7 +1070,13 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
             else{fechaNorm=`${parts[0]}-${parts[1].padStart(2,"0")}-${parts[2].padStart(2,"0")}`;}
           }
         }
-        if(fechaNorm>=desde&&fechaNorm<=hasta)acts.push({tipo:"📅 Reunión (Diio)",fecha:fechaNorm,nota:t.transcript?.substring(0,120)||""});
+        if(fechaNorm>=desde&&fechaNorm<=hasta){
+          // Mostrar solo las primeras 2 oraciones del resumen
+          const texto=t.transcript||"";
+          const oraciones=texto.split(/[.!?]/).filter(s=>s.trim().length>10);
+          const resumen=oraciones.slice(0,2).join(". ").trim();
+          acts.push({tipo:"📅 Reunión (Diio)",fecha:fechaNorm,nota:resumen?(resumen+"."):"Sin resumen"});
+        }
       }
       // Tareas completadas del mes
       for(const t of tareasComp.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
