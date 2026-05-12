@@ -564,126 +564,178 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   );
 }
 
-function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
-  const [open,setOpen]=useState(false);
+
+// --- Tareas Panel (reemplaza AIPendientesPanel) -------------------------------
+function TareasPanel({client,onUpdateTasks,transcripts}:{client:ClientRecord;onUpdateTasks:(tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
+  const [tasks,setTasks]=useState<ClientTask[]>(client.aiTasks||[]);
+  const [suggestions,setSuggestions]=useState<string[]>([]);
   const [loading,setLoading]=useState(false);
-  const [generated,setGenerated]=useState(false);
-  const [localTasks,setLocalTasks]=useState<Record<string,ClientTask[]>>({});
-  const companiesWithTranscripts=useMemo(()=>new Set(transcripts.map(t=>t.company.toLowerCase())),[transcripts]);
-  const clientsToProcess=useMemo(()=>clients.filter(c=>c.nextAction?.trim()||companiesWithTranscripts.has(c.companyName.toLowerCase())),[clients,companiesWithTranscripts]);
+  const [open,setOpen]=useState(false);
+  const hoy=todayISO();
 
-  async function generar(){
-    if(!clientsToProcess.length)return; setLoading(true);setGenerated(false);
-    const result:Record<string,ClientTask[]>={};
-    for(const client of clientsToProcess){
-      const clientTranscripts=transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).sort((a,b)=>a.date>b.date?-1:1).slice(0,3).map(t=>`[${t.date}] ${t.transcript}`);
-      try{
-        const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:`${client.stage}${client.subStage?` · ${client.subStage}`:""}`,comment:client.nextAction||"(sin comentario)",transcripts:clientTranscripts})});
-        const data=await res.json() as {tasks?:string[]};
-        result[client.id]=(data.tasks||[]).map((t:string)=>({id:newId(),text:t,done:false}));
-      }catch{result[client.id]=client.nextAction?[{id:newId(),text:client.nextAction,done:false}]:[];}
-    }
-    // Guardar en estado global para Mi semana
-    for(const [clientId,tasks] of Object.entries(result)){onUpdateTasks(clientId,tasks);}
-    setLocalTasks(result);setLoading(false);setGenerated(true);
+  // Sync tasks when client.aiTasks changes externally
+  useState(()=>{setTasks(client.aiTasks||[]);});
+
+  function addTask(text:string){
+    const newTask:ClientTask={id:newId(),text,done:false};
+    const updated=[...tasks,newTask];
+    setTasks(updated);
+    onUpdateTasks(updated);
+    setSuggestions(prev=>prev.filter(s=>s!==text));
   }
 
-  function toggleTask(clientId:string,taskId:string){
-    setLocalTasks(prev=>{
-      const tasks=(prev[clientId]||[]).map(t=>{
-        if(t.id!==taskId)return t;
-        const done=!t.done;
-        const isEmail=/correo|email|mail|mensaje|whatsapp|escribir|enviar/i.test(t.text);
-        const followUp:FollowUp|undefined=done&&isEmail&&!t.followUp?{id:newId(),text:`Esperar respuesta — ${t.text.substring(0,60)}`,dueDateISO:addDays(todayISO(),5),done:false,dismissed:false}:t.followUp;
-        return {...t,done,followUp};
+  function toggleTask(id:string){
+    const updated=tasks.map(t=>t.id===id?{...t,done:!t.done}:t);
+    setTasks(updated);
+    onUpdateTasks(updated);
+  }
+
+  function deleteTask(id:string){
+    const updated=tasks.filter(t=>t.id!==id);
+    setTasks(updated);
+    onUpdateTasks(updated);
+  }
+
+  async function generateSuggestions(){
+    setLoading(true);setSuggestions([]);
+    // Build context from Diio, meetings, completed tasks
+    const clientTranscripts=transcripts
+      .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
+      .sort((a,b)=>b.date.localeCompare(a.date))
+      .slice(0,5)
+      .map(t=>`[Reunión Diio ${t.date}] ${t.transcript?.substring(0,500)||""}`);
+    const meetings=(client.meetings||[])
+      .filter(m=>!m.fromDiio&&!m.pending)
+      .sort((a,b)=>b.date.localeCompare(a.date))
+      .slice(0,5)
+      .map(m=>`[${m.type==="correo"?"Correo":m.type==="llamado"?"Llamado":"Reunión"} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
+    const completedTasks=tasks
+      .filter(t=>t.done)
+      .slice(-5)
+      .map(t=>`[Tarea completada] ${t.text}`);
+    const pendingTasks=tasks
+      .filter(t=>!t.done)
+      .map(t=>t.text);
+
+    const context=[...clientTranscripts,...meetings,...completedTasks].join("
+
+");
+
+    try{
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:client.companyName,
+          stage:`${client.stage}${client.subStage?" - "+client.subStage:""}`,
+          comment:`Genera acciones comerciales específicas y concretas para el siguiente cliente. Basate en el historial de reuniones, correos y llamados. Si hay tareas completadas recientemente (especialmente correos enviados), evalúa si es necesario hacer seguimiento. Las tareas ya pendientes son: ${pendingTasks.join(", ")||"ninguna"}. Solo sugiere lo que realmente tiene sentido hacer ahora. Sé específico con nombres y contexto.`,
+          transcripts:clientTranscripts
+        })
       });
-      onUpdateTasks(clientId,tasks);
-      return {...prev,[clientId]:tasks};
-    });
+      const data=await res.json() as {tasks?:string[]};
+      // Filter out tasks already in the list
+      const existing=new Set(tasks.map(t=>t.text.toLowerCase()));
+      const filtered=(data.tasks||[]).filter(s=>!existing.has(s.toLowerCase()));
+      setSuggestions(filtered);
+    }catch{setSuggestions(["Error al generar sugerencias"]);}
+    setLoading(false);
   }
-  function dismissFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,dismissed:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
-  function completeFollowUp(clientId:string,taskId:string){setLocalTasks(prev=>{const tasks=(prev[clientId]||[]).map(t=>t.id===taskId?{...t,followUp:t.followUp?{...t.followUp,done:true}:undefined}:t);onUpdateTasks(clientId,tasks);return {...prev,[clientId]:tasks};});}
 
-  const alarms=useMemo(()=>{const a:Array<{client:ClientRecord;task:ClientTask;followUp:FollowUp}>=[];for(const client of clients){for(const task of (localTasks[client.id]||client.aiTasks||[])){if(task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&isPast(task.followUp.dueDateISO)){a.push({client,task,followUp:task.followUp});}}}return a;},[clients,localTasks]);
+  const pendientes=tasks.filter(t=>!t.done);
+  const completadas=tasks.filter(t=>t.done);
+  const hasSuggestions=suggestions.length>0;
 
   return(
-    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-      {alarms.length>0&&(
-        <div style={{background:D.alarmBg,border:`1px solid ${D.alarmBorder}`,borderRadius:"14px",padding:"12px 16px"}}>
-          <div style={{fontSize:"13px",fontWeight:600,color:"#dc2626",marginBottom:"8px"}}>⚠ {alarms.length} seguimiento{alarms.length>1?"s":""} vencido{alarms.length>1?"s":""}</div>
-          {alarms.map(({client,task,followUp},i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"6px",fontSize:"12px",color:"#7f1d1d"}}>
-              <span style={{flex:1}}><strong>{client.companyName}</strong> — {followUp.text} (venció {followUp.dueDateISO})</span>
-              <button onClick={()=>completeFollowUp(client.id,task.id)} style={{padding:"3px 8px",borderRadius:"6px",border:"1px solid #fca5a5",background:D.white,fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>Resuelto</button>
-              <button onClick={()=>dismissFollowUp(client.id,task.id)} style={{padding:"3px 8px",borderRadius:"6px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink3}}>Ignorar</button>
+    <div style={{background:"#FFFFFF",border:"1px solid #E8E6E1",borderRadius:"14px",overflow:"hidden",marginBottom:"10px"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 14px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+          <span style={{fontSize:"12px",fontWeight:600,color:"#1A1A1A"}}>{client.companyName}</span>
+          {client.subStage&&<span style={{fontSize:"10px",color:"#8A8A8A"}}>· {client.subStage}</span>}
+          {pendientes.length>0&&<span style={{fontSize:"10px",background:"#E8500A",color:"white",padding:"1px 7px",borderRadius:"10px",fontWeight:600}}>{pendientes.length}</span>}
+          {hasSuggestions&&<span style={{fontSize:"10px",background:"#7C3AED",color:"white",padding:"1px 7px",borderRadius:"10px",fontWeight:600}}>✦ {suggestions.length} sugerencias</span>}
+        </div>
+        <span style={{color:"#8A8A8A",fontSize:"11px"}}>{open?"▲":"▼"}</span>
+      </button>
+
+      {open&&(
+        <div style={{borderTop:"1px solid #E8E6E1",padding:"12px 14px"}}>
+          {/* Tareas fijas pendientes */}
+          {pendientes.length>0&&(
+            <div style={{marginBottom:"10px"}}>
+              {pendientes.map(task=>(
+                <div key={task.id} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"6px 0",borderBottom:"1px solid #F0EEE9"}}>
+                  <input type="checkbox" checked={false} onChange={()=>toggleTask(task.id)} style={{marginTop:"2px",accentColor:"#E8500A",flexShrink:0}}/>
+                  <span style={{flex:1,fontSize:"12px",color:"#1A1A1A",lineHeight:1.4}}>{task.text}</span>
+                  <button onClick={()=>deleteTask(task.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"13px",padding:"0 2px",flexShrink:0}}>×</button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+
+          {/* Completadas (colapsadas) */}
+          {completadas.length>0&&(
+            <div style={{marginBottom:"10px"}}>
+              <div style={{fontSize:"10px",color:"#8A8A8A",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"4px"}}>✓ Completadas ({completadas.length})</div>
+              {completadas.map(task=>(
+                <div key={task.id} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"4px 0"}}>
+                  <input type="checkbox" checked={true} onChange={()=>toggleTask(task.id)} style={{marginTop:"2px",accentColor:"#16a34a",flexShrink:0}}/>
+                  <span style={{flex:1,fontSize:"11px",color:"#8A8A8A",textDecoration:"line-through",lineHeight:1.4}}>{task.text}</span>
+                  <button onClick={()=>deleteTask(task.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"13px",padding:"0 2px",flexShrink:0}}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Sugerencias IA */}
+          {hasSuggestions&&(
+            <div style={{background:"#F5F3FF",borderRadius:"10px",padding:"10px 12px",marginBottom:"10px"}}>
+              <div style={{fontSize:"10px",fontWeight:600,color:"#7C3AED",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"8px"}}>✦ Sugerencias IA — click para agregar</div>
+              <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                {suggestions.map((s,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"8px",padding:"6px 8px",background:"white",borderRadius:"8px",border:"1px solid #DDD6FE",cursor:"pointer"}}
+                    onClick={()=>addTask(s)}
+                    onMouseEnter={e=>(e.currentTarget.style.background="#EDE9FE")}
+                    onMouseLeave={e=>(e.currentTarget.style.background="white")}>
+                    <span style={{fontSize:"12px",color:"#7C3AED",flexShrink:0,marginTop:"1px"}}>＋</span>
+                    <span style={{fontSize:"12px",color:"#1A1A1A",lineHeight:1.4,flex:1}}>{s}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={()=>setSuggestions([])} style={{marginTop:"8px",fontSize:"10px",color:"#8A8A8A",background:"none",border:"none",cursor:"pointer",padding:0}}>Descartar sugerencias</button>
+            </div>
+          )}
+
+          {/* Botón generar */}
+          <button onClick={generateSuggestions} disabled={loading} style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1px solid #DDD6FE",background:loading?"#F5F3FF":"white",fontSize:"12px",cursor:loading?"default":"pointer",color:"#7C3AED",fontWeight:500,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px"}}>
+            {loading?<><span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>Analizando...</>:<>✦ {hasSuggestions?"Regenerar sugerencias":"Sugerir tareas con IA"}</>}
+          </button>
         </div>
       )}
-      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
-        <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"1rem 1.25rem",background:"none",border:"none",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,${D.accent},${D.accentY})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"13px",flexShrink:0}}>✦</div>
-            <div style={{textAlign:"left"}}>
-              <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Acciones recomendadas por IA</div>
-              <div style={{fontSize:"11px",color:D.ink3}}>{clientsToProcess.length} cliente{clientsToProcess.length!==1?"s":""} con comentarios o transcripciones</div>
-            </div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-            {generated&&<span style={{fontSize:"10px",padding:"2px 8px",borderRadius:"20px",background:`${D.accent}15`,color:D.accent,fontWeight:600}}>activo</span>}
-            <span style={{color:D.ink3,fontSize:"12px"}}>{open?"▲":"▼"}</span>
-          </div>
-        </button>
-        {open&&(
-          <div style={{borderTop:`1px solid ${D.border}`,padding:"1rem 1.25rem 1.25rem"}}>
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"1rem"}}>
-              <button onClick={generar} disabled={loading||!clientsToProcess.length} style={{padding:"7px 16px",borderRadius:"10px",border:"none",background:loading?D.border:`linear-gradient(135deg,${D.accent},${D.accentY})`,color:loading?D.ink3:D.white,fontSize:"12px",fontWeight:600,cursor:"pointer"}}>
-                {loading?"Analizando…":generated?"↻ Regenerar":"✦ Generar con IA"}
-              </button>
-            </div>
-            {!generated&&!loading&&<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,background:D.bg,padding:"2rem",textAlign:"center",color:D.ink3,fontSize:"12px"}}>Apretá "Generar con IA" para ver qué hacer con cada cliente</div>}
-            {loading&&<div style={{display:"flex",flexDirection:"column",gap:"8px"}}>{[...Array(3)].map((_,i)=><div key={i} style={{height:"56px",borderRadius:"10px",background:D.bg}}/>)}</div>}
-            {generated&&!loading&&(
-              <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-                {clientsToProcess.map(client=>{
-                  const tasks=localTasks[client.id]||[];
-                  const hasDiio=companiesWithTranscripts.has(client.companyName.toLowerCase());
-                  return(
-                    <div key={client.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px"}}>
-                      <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px"}}>
-                        <span style={{width:"6px",height:"6px",borderRadius:"50%",background:D.accent,flexShrink:0,display:"inline-block"}}/>
-                        {client.companyName}
-                        {client.subStage&&<span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>· {client.subStage}</span>}
-                        {hasDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>+ Diio</span>}
-                      </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
-                        {tasks.length===0&&<div style={{fontSize:"11px",color:D.ink3}}>Sin tareas generadas</div>}
-                        {tasks.map(task=>(
-                          <div key={task.id}>
-                            <label style={{display:"flex",alignItems:"flex-start",gap:"8px",cursor:"pointer"}}>
-                              <input type="checkbox" checked={task.done} onChange={()=>toggleTask(client.id,task.id)} style={{marginTop:"2px",accentColor:D.accent,flexShrink:0}}/>
-                              <span style={{fontSize:"12px",color:task.done?D.ink3:D.ink,textDecoration:task.done?"line-through":"none",lineHeight:1.4}}>{task.text}</span>
-                            </label>
-                            {task.followUp&&!task.followUp.done&&!task.followUp.dismissed&&(
-                              <div style={{marginLeft:"24px",marginTop:"4px",padding:"5px 10px",borderRadius:"8px",background:isPast(task.followUp.dueDateISO)?D.alarmBg:"#FFF9F0",border:`1px solid ${isPast(task.followUp.dueDateISO)?D.alarmBorder:"#FDE68A"}`,fontSize:"11px",color:isPast(task.followUp.dueDateISO)?"#dc2626":"#92400e",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px"}}>
-                                <span>⏱ Seguimiento al {task.followUp.dueDateISO}{isPast(task.followUp.dueDateISO)?" — ¡VENCIDO!":""}</span>
-                                <button onClick={()=>completeFollowUp(client.id,task.id)} style={{padding:"2px 7px",borderRadius:"5px",border:"none",background:"transparent",fontSize:"10px",cursor:"pointer",color:"inherit",fontWeight:600}}>✓ Listo</button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
+
+function TareasPanelGroup({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
+  const clientsWithActivity=clients.filter(c=>
+    (c.aiTasks&&c.aiTasks.length>0)||
+    transcripts.some(t=>t.company.toLowerCase()===c.companyName.toLowerCase())||
+    (c.nextAction&&c.nextAction.trim())
+  );
+  const clientsWithout=clients.filter(c=>!clientsWithActivity.includes(c));
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:"0"}}>
+      {clientsWithActivity.map(client=>(
+        <TareasPanel key={client.id} client={client} onUpdateTasks={(tasks)=>onUpdateTasks(client.id,tasks)} transcripts={transcripts}/>
+      ))}
+      {clientsWithout.map(client=>(
+        <TareasPanel key={client.id} client={client} onUpdateTasks={(tasks)=>onUpdateTasks(client.id,tasks)} transcripts={transcripts}/>
+      ))}
+    </div>
+  );
+}
+
+
 
 // --- Dashboard Charts ---------------------------------------------------------
 function ProbChart({clients}:{clients:ClientRecord[]}){
@@ -1313,7 +1365,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
       </div>
       <FiltrosPipeline subStages={P1_SUBSTAGE_ORDER} onFilter={setFiltro}/>
       <DashboardPanels clients={clients} transcripts={transcripts} onEdit={onEdit} onUpdateMeetings={onUpdateMeetings} onUpdateLastContact={onUpdateLastContact} onMarkContact={onMarkContact} recentContacts={recentContacts} alertOnly/>
-      <AIPendientesPanel clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      <TareasPanelGroup clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
           const items=bySubStage.get(sub)??[];
@@ -1354,7 +1406,7 @@ function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
         ))}
       </div>
       <FiltrosPipeline subStages={[]} onFilter={setFiltro}/>
-      <AIPendientesPanel clients={p2} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      <TareasPanelGroup clients={p2} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
         {p2Filtered.length?p2Filtered.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes{filtro.soloSf||filtro.minMwp?" con estos filtros":" en Pipeline P2"}</div>)}
       </div>
@@ -1367,7 +1419,7 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
   const pasivos=clients.filter(c=>c.stage==="Prospecto Pasivo");
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
-      <AIPendientesPanel clients={[...activos,...pasivos]} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      <TareasPanelGroup clients={[...activos,...pasivos]} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
       {[{label:"Prospectos Activos",items:activos},{label:"Prospectos Pasivos",items:pasivos}].map(({label,items})=>(
         <div key={label}>
           <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
