@@ -220,7 +220,11 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
   const recentAll={...recentContacts,...getRecentContacts()};
   if(recentAll[key]){const d=new Date(recentAll[key]);if(!isNaN(d.getTime()))fechas.push(d);}
   for(const m of (c.meetings||[])){if(!m.pending){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}}
-  for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
+  for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){
+    let fechaNorm=t.date;
+    if(t.date&&t.date.includes("/")){const p=t.date.split("/");if(p.length===3){fechaNorm=p[2].length===4?`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`:`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`;}}
+    const d=new Date(fechaNorm);if(!isNaN(d.getTime()))fechas.push(d);
+  }
   try{
     const raw=localStorage.getItem(MI_DIA_KEY);
     if(raw){const tasks=JSON.parse(raw) as DailyTask[];for(const t of tasks.filter(t=>t.done&&(t.clientId===c.id||t.clientName?.toLowerCase()===key))){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}}
@@ -1037,9 +1041,18 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
           acts.push({tipo,fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||"",pendiente:!!m.pending});
         }
       }
-      // Diio del mes
+      // Diio del mes - normalizar fecha para comparar
       for(const t of transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())){
-        if(t.date>=desde&&t.date<=hasta)acts.push({tipo:"📅 Reunión (Diio)",fecha:t.date,nota:t.transcript?.substring(0,120)||""});
+        // Normalizar fecha DD/MM/YYYY o YYYY-MM-DD a YYYY-MM-DD
+        let fechaNorm=t.date;
+        if(t.date&&t.date.includes("/")){
+          const parts=t.date.split("/");
+          if(parts.length===3){
+            if(parts[2].length===4){fechaNorm=`${parts[2]}-${parts[1].padStart(2,"0")}-${parts[0].padStart(2,"0")}`;}
+            else{fechaNorm=`${parts[0]}-${parts[1].padStart(2,"0")}-${parts[2].padStart(2,"0")}`;}
+          }
+        }
+        if(fechaNorm>=desde&&fechaNorm<=hasta)acts.push({tipo:"📅 Reunión (Diio)",fecha:fechaNorm,nota:t.transcript?.substring(0,120)||""});
       }
       // Tareas completadas del mes
       for(const t of tareasComp.filter(t=>t.clientId===client.id||t.clientName?.toLowerCase()===client.companyName.toLowerCase())){
