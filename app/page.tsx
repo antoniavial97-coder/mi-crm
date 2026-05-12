@@ -11,7 +11,7 @@ type SubStage =
 type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
-type Meeting = { id: string; date: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; };
+type Meeting = { id: string; date: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
@@ -202,27 +202,27 @@ function ContactPopup({contacts,companyName,contactName}:{contacts:ContactInfo[]
 
 // --- Client Detail Modal (Reuniones + Llamados) -------------------------------
 function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client:ClientRecord;transcripts:TranscriptInfo[];onUpdateMeetings:(meetings:Meeting[])=>void;onClose:()=>void}){
+  const today=todayISO();
   const [meetings,setMeetings]=useState<Meeting[]>(()=>{
-    // Merge Diio transcripts as meetings
     const diioMeetings=transcripts
       .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
-      .map(t=>({id:`diio-${t.date}-${t.company}`,date:t.date,type:"reunion" as const,summary:undefined,notes:t.transcript,fromDiio:true}));
-    const existing=client.meetings||[];
-    const diioIds=new Set(diioMeetings.map(m=>m.id));
+      .map(t=>({id:`diio-${t.date}-${t.company}`,date:t.date,type:"reunion" as const,notes:t.transcript,fromDiio:true,pending:false}));
+    const existing=(client.meetings||[]).map(m=>({...m,pending:m.pending||(m.date>today&&!m.fromDiio)}));
     return [...existing.filter(m=>!m.fromDiio),...diioMeetings].sort((a,b)=>b.date.localeCompare(a.date));
   });
   const [showForm,setShowForm]=useState(false);
-  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:todayISO(),type:"reunion",subject:"",notes:""});
+  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:today,type:"reunion",subject:"",notes:""});
   const [summarizing,setSummarizing]=useState<string|null>(null);
   const [summaries,setSummaries]=useState<Record<string,string>>({});
 
   function addMeeting(){
     if(!newMeeting.notes.trim()&&!newMeeting.subject.trim())return;
-    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false};
+    const isPending=newMeeting.date>today;
+    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false,pending:isPending};
     const updated=[m,...meetings].sort((a,b)=>b.date.localeCompare(a.date));
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
-    setNewMeeting({date:todayISO(),type:"reunion",subject:"",notes:""});
+    setNewMeeting({date:today,type:"reunion",subject:"",notes:""});
     setShowForm(false);
   }
 
@@ -232,49 +232,55 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
   }
 
+  function markDone(id:string){
+    const updated=meetings.map(m=>m.id===id?{...m,pending:false}:m);
+    setMeetings(updated);
+    onUpdateMeetings(updated.filter(x=>!x.fromDiio));
+  }
+
   async function summarize(meeting:Meeting){
     if(!meeting.notes||summaries[meeting.id])return;
     setSummarizing(meeting.id);
     try{
-      const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:client.stage,comment:`Resume en 2-3 líneas qué pasó en esta ${meeting.type}: ${meeting.notes.substring(0,800)}`,transcripts:[]})});
+      const res=await fetch("/api/generate-actions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({company:client.companyName,stage:client.stage,comment:`Resume en 2-3 líneas: ${meeting.notes.substring(0,800)}`,transcripts:[]})});
       const data=await res.json() as {tasks?:string[]};
-      setSummaries(prev=>({...prev,[meeting.id]:data.tasks?.[0]||"Sin resumen disponible"}));
+      setSummaries(prev=>({...prev,[meeting.id]:data.tasks?.[0]||"Sin resumen"}));
     }catch{setSummaries(prev=>({...prev,[meeting.id]:"Error al generar resumen"}));}
     setSummarizing(null);
   }
 
+  const pendientes=meetings.filter(m=>m.pending&&!m.fromDiio);
+  const realizadas=meetings.filter(m=>!m.pending);
+
   return(
     <div>
-      {/* Historial de etapa */}
+      {/* Stagedate info */}
       {client.stageDate&&(
-        <div style={{background:D.bg,borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-          <div style={{fontSize:"11px",color:D.ink3}}>Etapa actual:</div>
-          <div style={{fontSize:"12px",fontWeight:600,color:D.accent}}>{client.subStage||client.stage}</div>
-          <div style={{fontSize:"11px",color:D.ink3}}>desde</div>
-          <div style={{fontSize:"12px",fontWeight:500,color:D.ink}}>{formatDateShort(client.stageDate)}</div>
-          <div style={{fontSize:"11px",color:D.ink3}}>·</div>
+        <div style={{background:"var(--color-background-secondary,#F8F7F4)",borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
+          <div style={{fontSize:"11px",color:"#8A8A8A"}}>Etapa actual:</div>
+          <div style={{fontSize:"12px",fontWeight:600,color:"#E8500A"}}>{client.subStage||client.stage}</div>
+          <div style={{fontSize:"11px",color:"#8A8A8A"}}>desde {formatDateShort(client.stageDate)}</div>
           <div style={{fontSize:"12px",fontWeight:600,color:Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24))>30?"#dc2626":"#16a34a"}}>
-            {Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24))} días en esta etapa
+            · {Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24))} días
           </div>
         </div>
       )}
+
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
-        <div style={{fontSize:"13px",color:D.ink3}}>{meetings.length} interacciones registradas</div>
-        <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:D.ink,color:D.white,fontSize:"12px",cursor:"pointer",fontWeight:600}}>
-          + Agregar
-        </button>
+        <div style={{fontSize:"13px",color:"#8A8A8A"}}>{realizadas.length} realizadas · {pendientes.length} agendadas</div>
+        <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:"#1A1A1A",color:"#FFFFFF",fontSize:"12px",cursor:"pointer",fontWeight:600}}>+ Agregar</button>
       </div>
 
       {showForm&&(
-        <div style={{background:D.bg,borderRadius:"12px",padding:"14px",marginBottom:"1rem",display:"flex",flexDirection:"column",gap:"10px"}}>
+        <div style={{background:"#F8F7F4",borderRadius:"12px",padding:"14px",marginBottom:"1rem",display:"flex",flexDirection:"column",gap:"10px"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
             <div>
-              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Fecha</div>
-              <input type="date" value={newMeeting.date} onChange={e=>setNewMeeting(p=>({...p,date:e.target.value}))} style={iStyle}/>
+              <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Fecha {newMeeting.date>today&&<span style={{color:"#1D4ED8",fontSize:"10px"}}>(se agenda como futura)</span>}</div>
+              <input type="date" value={newMeeting.date} onChange={e=>setNewMeeting(p=>({...p,date:e.target.value}))} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}}/>
             </div>
             <div>
-              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Tipo</div>
-              <select value={newMeeting.type} onChange={e=>setNewMeeting(p=>({...p,type:e.target.value as "reunion"|"llamado"|"correo"}))} style={iStyle}>
+              <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Tipo</div>
+              <select value={newMeeting.type} onChange={e=>setNewMeeting(p=>({...p,type:e.target.value as "reunion"|"llamado"|"correo"}))} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}}>
                 <option value="reunion">📅 Reunión</option>
                 <option value="llamado">📞 Llamado</option>
                 <option value="correo">✉ Correo</option>
@@ -283,297 +289,71 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
           </div>
           {newMeeting.type==="correo"&&(
             <div>
-              <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>Asunto del correo</div>
-              <input value={newMeeting.subject} onChange={e=>setNewMeeting(p=>({...p,subject:e.target.value}))} style={iStyle} placeholder="Ej: Propuesta comercial Agrícola San Osvaldo"/>
+              <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Asunto</div>
+              <input value={newMeeting.subject} onChange={e=>setNewMeeting(p=>({...p,subject:e.target.value}))} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}} placeholder="Asunto del correo"/>
             </div>
           )}
           <div>
-            <div style={{fontSize:"11px",color:D.ink2,marginBottom:"4px",fontWeight:500}}>{newMeeting.type==="correo"?"Contenido / resumen del correo":"Notas"}</div>
-            <textarea value={newMeeting.notes} onChange={e=>setNewMeeting(p=>({...p,notes:e.target.value}))} rows={3} style={{...iStyle,resize:"vertical"}} placeholder={newMeeting.type==="correo"?"¿Qué decía el correo? ¿Qué respondiste?":"¿Qué se habló? ¿Cuáles fueron los acuerdos?"}/>
+            <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>{newMeeting.type==="correo"?"Contenido":"Notas"}</div>
+            <textarea value={newMeeting.notes} onChange={e=>setNewMeeting(p=>({...p,notes:e.target.value}))} rows={3} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box",resize:"vertical"}} placeholder={newMeeting.date>today?"Descripción de la reunión agendada...":"¿Qué se habló?"}/>
           </div>
           <div style={{display:"flex",gap:"8px",justifyContent:"flex-end"}}>
-            <button onClick={()=>setShowForm(false)} style={{padding:"6px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
-            <button onClick={addMeeting} style={{padding:"6px 14px",borderRadius:"8px",border:"none",background:D.accent,color:D.white,fontSize:"12px",cursor:"pointer",fontWeight:600}}>Guardar</button>
+            <button onClick={()=>setShowForm(false)} style={{padding:"6px 12px",borderRadius:"8px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"12px",cursor:"pointer",color:"#4A4A4A"}}>Cancelar</button>
+            <button onClick={addMeeting} style={{padding:"6px 14px",borderRadius:"8px",border:"none",background:"#E8500A",color:"#FFFFFF",fontSize:"12px",cursor:"pointer",fontWeight:600}}>{newMeeting.date>today?"📅 Agendar":"Guardar"}</button>
           </div>
         </div>
       )}
 
-      <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
-        {meetings.length===0&&<div style={{textAlign:"center",color:D.ink3,fontSize:"12px",padding:"2rem",border:`1px dashed ${D.border}`,borderRadius:"12px"}}>Sin interacciones registradas todavía</div>}
-        {meetings.map(m=>(
-          <div key={m.id} style={{background:D.bg,borderRadius:"12px",padding:"12px 14px",border:`1px solid ${D.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
-              <span style={{fontSize:"11px",fontWeight:600,color:D.white,background:m.type==="reunion"?D.accent:m.type==="llamado"?"#7C3AED":"#0891b2",padding:"2px 8px",borderRadius:"20px"}}>
-                {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}
-              </span>
-              <span style={{fontSize:"11px",color:D.ink3}}>{formatDateShort(m.date)}</span>
-              {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
-              <div style={{flex:1}}/>
-              {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"2px 6px"}}>×</button>}
-            </div>
-            {m.subject&&(
-              <div style={{fontSize:"12px",fontWeight:500,color:D.ink,marginBottom:"4px"}}>📌 {m.subject}</div>
-            )}
-            {m.notes&&(
-              <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.5,marginBottom:"6px",maxHeight:"80px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>
-                {m.notes}
-              </div>
-            )}
-            {summaries[m.id]&&(
-              <div style={{background:D.white,borderRadius:"8px",padding:"8px 10px",fontSize:"11px",color:D.ink2,borderLeft:`2px solid ${D.accent}`,marginTop:"6px"}}>
-                <span style={{fontWeight:600,color:D.accent,marginRight:"4px"}}>Resumen IA:</span>{summaries[m.id]}
-              </div>
-            )}
-            {m.fromDiio&&m.notes&&!summaries[m.id]&&(
-              <button onClick={()=>summarize(m)} disabled={summarizing===m.id} style={{marginTop:"4px",padding:"3px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>
-                {summarizing===m.id?"Resumiendo…":"✦ Resumir con IA"}
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const DIAS_ALERTA = 14;
-const RECENT_CONTACTS_KEY = "solar-crm:recent-contacts";
-const MI_DIA_KEY = "solar-crm:midia";
-type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
-
-function getRecentContacts():Record<string,string>{
-  try{const raw=localStorage.getItem(RECENT_CONTACTS_KEY);return raw?JSON.parse(raw):{};}catch{return {};}
-}
-function saveRecentContact(clientId:string,date:string){
-  try{const data=getRecentContacts();data[clientId]=date;localStorage.setItem(RECENT_CONTACTS_KEY,JSON.stringify(data));}catch{}
-}
-function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentContacts:Record<string,string>):Date|null{
-  const fechas:Date[]=[];
-  if(c.stageDate){const d=new Date(c.stageDate);if(!isNaN(d.getTime()))fechas.push(d);}
-  if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
-  // Leer recentContacts por nombre empresa
-  const key=c.companyName.toLowerCase();
-  const recentAll={...recentContacts,...getRecentContacts()};
-  if(recentAll[key]){const d=new Date(recentAll[key]);if(!isNaN(d.getTime()))fechas.push(d);}
-  // Leer tareas completadas de Mi día directamente del localStorage
-  try{
-    const raw=localStorage.getItem(MI_DIA_KEY);
-    if(raw){
-      const tasks=JSON.parse(raw) as DailyTask[];
-      for(const t of tasks.filter(t=>t.done&&t.clientId===c.id||t.done&&t.clientName?.toLowerCase()===key)){
-        const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);
-      }
-    }
-  }catch{}
-  for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
-  for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
-  if(fechas.length===0)return null;
-  return new Date(Math.max(...fechas.map(d=>d.getTime())));
-}
-
-// --- Dashboard Panel: Mi día + Sin contacto ------------------------------------
-function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,onMarkContact,recentContacts,alertOnly}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;alertOnly?:boolean}){
-  // Mi día state
-  const [miDiaOpen,setMiDiaOpen]=useState(false);
-  const [alertOpen,setAlertOpen]=useState(false);
-  const [tasks,setTasks]=useState<DailyTask[]>([]);
-  const [input,setInput]=useState("");
-  const [selectedClient,setSelectedClient]=useState("");
-  const [editingClientFor,setEditingClientFor]=useState<string|null>(null);
-  // Estado local de contactos recientes para re-render inmediato
-  const [localRecent,setLocalRecent]=useState<Record<string,string>>(()=>{
-    try{return getRecentContacts();}catch{return {};}
-  });
-  const [alertTick,setAlertTick]=useState(0);
-  const hoy=todayISO();
-
-  useEffect(()=>{
-    try{
-      const raw=localStorage.getItem(MI_DIA_KEY);
-      if(raw)setTasks((JSON.parse(raw) as DailyTask[]).map(t=>t.done?t:{...t,date:hoy}));
-    }catch{}
-  },[]);
-  useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
-
-  const alertas=useMemo(()=>{
-    const recentC={...recentContacts,...localRecent};
-    const hoyDate=new Date();
-    return clients
-      .filter(c=>(c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")||c.stage==="Prospecto Activo")
-      .map(c=>{
-        const ultima=getLastActivity(c,transcripts,recentC);
-        if(!ultima)return {client:c,dias:999,ultimaActividad:"Sin registro"};
-        const dias=Math.floor((hoyDate.getTime()-ultima.getTime())/(1000*60*60*24));
-        return {client:c,dias,ultimaActividad:formatDateShort(ultima.toISOString().slice(0,10))};
-      })
-      .filter(x=>x.dias>=DIAS_ALERTA)
-      .sort((a,b)=>b.dias-a.dias);
-  },[clients,transcripts,recentContacts,localRecent,alertTick]);
-
-  function markContact(clientId:string){
-    const client=clients.find(c=>c.id===clientId);
-    if(!client)return;
-    const key=client.companyName.toLowerCase();
-    saveRecentContact(key,hoy);
-    setLocalRecent(prev=>({...prev,[key]:hoy}));
-    setAlertTick(t=>t+1);
-    onMarkContact(clientId);
-  }
-
-  function addTask(){
-    const text=input.trim(); if(!text)return;
-    const client=clients.find(c=>c.id===selectedClient);
-    setTasks(prev=>[...prev,{id:newId(),text,done:false,date:hoy,clientId:client?.id,clientName:client?.companyName}]);
-    setInput("");setSelectedClient("");
-  }
-  function toggleTask(id:string){
-    setTasks(prev=>prev.map(t=>{
-      if(t.id!==id)return t;
-      const nowDone=!t.done;
-      if(nowDone&&t.clientId){
-        const client=clients.find(c=>c.id===t.clientId);
-        if(client){
-          const tipo:Meeting["type"]=/correo|email|mail|enviar/i.test(t.text)?"correo":/llamar|llamado|teléfono/i.test(t.text)?"llamado":"reunion";
-          const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false};
-          onUpdateMeetings(t.clientId,[...(client.meetings||[]),m]);
-          onUpdateLastContact(t.clientId);
-          markContact(t.clientId);
-        }
-      }
-      return {...t,done:nowDone};
-    }));
-  }
-  function assignClient(taskId:string,clientId:string){
-    const client=clients.find(c=>c.id===clientId);
-    setTasks(prev=>prev.map(t=>t.id===taskId?{...t,clientId:client?.id,clientName:client?.companyName}:t));
-    setEditingClientFor(null);
-  }
-  function deleteTask(id:string){setTasks(prev=>prev.filter(t=>t.id!==id));}
-  function clearCompleted(){setTasks(prev=>prev.filter(t=>!t.done));}
-
-  const pendientes=tasks.filter(t=>!t.done);
-  const completadas=tasks.filter(t=>t.done);
-  const pendientesDeAyer=pendientes.filter(t=>t.date<hoy);
-  const pendientesDeHoy=pendientes.filter(t=>t.date===hoy);
-  const pipelineClients=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2"||c.stage==="Prospecto Activo").sort((a,b)=>a.companyName.localeCompare(b.companyName));
-
-  const renderTask=(t:DailyTask)=>(
-    <div key={t.id} style={{padding:"7px 10px",borderRadius:"8px",background:t.date<hoy?"#FFFBEB":t.done?"#F0FBF4":D.bg,border:t.date<hoy?"1px solid #FDE68A":"none",marginBottom:"4px"}}>
-      <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-        <input type="checkbox" checked={t.done} onChange={()=>toggleTask(t.id)} style={{accentColor:t.done?"#16a34a":D.accent,flexShrink:0}}/>
-        <span style={{flex:1,fontSize:"12px",color:t.done?D.ink3:D.ink,textDecoration:t.done?"line-through":"none"}}>{t.text}</span>
-        {t.date<hoy&&!t.done&&<span style={{fontSize:"10px",color:"#d97706",flexShrink:0}}>{t.date}</span>}
-        {!t.done&&<button onClick={()=>setEditingClientFor(editingClientFor===t.id?null:t.id)} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"6px",cursor:"pointer",fontSize:"10px",color:D.ink3,padding:"2px 6px",flexShrink:0}}>{t.clientName?"✎":"+ cliente"}</button>}
-        <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px",flexShrink:0}}>×</button>
-      </div>
-      {t.clientName&&editingClientFor!==t.id&&(
-        <div style={{marginTop:"4px",marginLeft:"22px"}}>
-          <span style={{fontSize:"10px",fontWeight:600,color:D.accent,background:`${D.accent}12`,padding:"1px 7px",borderRadius:"10px"}}>📌 {t.clientName}</span>
-          {t.done&&<span style={{marginLeft:"6px",fontSize:"10px",color:"#16a34a"}}>✓ registrado en historial</span>}
-        </div>
-      )}
-      {editingClientFor===t.id&&(
-        <div style={{marginTop:"6px",marginLeft:"22px"}}>
-          <select defaultValue={t.clientId||""} onChange={e=>assignClient(t.id,e.target.value)} style={{...iStyle,fontSize:"11px"}} autoFocus>
-            <option value="">Sin cliente</option>
-            <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-            <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-            <optgroup label="Prospectos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-          </select>
-        </div>
-      )}
-    </div>
-  );
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
-      {/* Alerta sin contacto */}
-      {alertas.length>0&&(
-        <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:"14px",overflow:"hidden"}}>
-          <button onClick={()=>setAlertOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-              <span style={{fontSize:"16px"}}>⏰</span>
-              <div style={{textAlign:"left"}}>
-                <div style={{fontSize:"13px",fontWeight:600,color:"#9A3412"}}>{alertas.length} cliente{alertas.length>1?"s":""} sin contacto hace +{DIAS_ALERTA} días</div>
-                <div style={{fontSize:"11px",color:"#C2410C"}}>Pipeline P1 y Prospectos Activos · Requiere atención</div>
-              </div>
-            </div>
-            <span style={{color:"#C2410C",fontSize:"12px"}}>{alertOpen?"▲":"▼"}</span>
-          </button>
-          {alertOpen&&(
-            <div style={{borderTop:"1px solid #FED7AA",padding:"10px 16px",display:"flex",flexDirection:"column",gap:"6px"}}>
-              {alertas.map(({client,dias,ultimaActividad})=>(
-                <div key={client.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"8px 10px",background:"white",borderRadius:"10px",border:"1px solid #FED7AA"}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:"12px",fontWeight:600,color:"#1A1A1A"}}>{client.companyName}</div>
-                    <div style={{fontSize:"11px",color:"#8A8A8A",marginTop:"1px"}}>
-                      {client.subStage&&<span style={{marginRight:"8px"}}>{client.subStage}</span>}
-                      Última actividad: {ultimaActividad}
-                    </div>
-                  </div>
-                  <div style={{flexShrink:0,textAlign:"right"}}>
-                    <div style={{fontSize:"12px",fontWeight:700,color:dias>30?"#dc2626":"#ea580c"}}>{dias} días</div>
-                    <button onClick={()=>onEdit(client.id)} style={{fontSize:"10px",padding:"2px 8px",borderRadius:"6px",border:"1px solid #FED7AA",background:"white",cursor:"pointer",color:"#C2410C",marginTop:"2px"}}>Editar</button>
-                  </div>
+      {/* Pendientes / agendadas */}
+      {pendientes.length>0&&(
+        <div style={{marginBottom:"1rem"}}>
+          <div style={{fontSize:"11px",fontWeight:600,color:"#1D4ED8",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>📅 Agendadas</div>
+          <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+            {pendientes.map(m=>(
+              <div key={m.id} style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:"12px",padding:"12px 14px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}}>
+                  <span style={{fontSize:"11px",fontWeight:600,color:"#1D4ED8"}}>{m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}</span>
+                  <span style={{fontSize:"11px",color:"#1D4ED8",fontWeight:500}}>{formatDateShort(m.date)}</span>
+                  <div style={{flex:1}}/>
+                  <button onClick={()=>markDone(m.id)} style={{padding:"3px 10px",borderRadius:"6px",border:"1px solid #BFDBFE",background:"#FFFFFF",fontSize:"11px",cursor:"pointer",color:"#1D4ED8",fontWeight:600}}>✓ Realizada</button>
+                  <button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"12px",padding:"2px 4px"}}>×</button>
                 </div>
-              ))}
-            </div>
-          )}
+                {m.subject&&<div style={{fontSize:"12px",fontWeight:500,color:"#1A1A1A",marginBottom:"2px"}}>📌 {m.subject}</div>}
+                {m.notes&&<div style={{fontSize:"11px",color:"#4A4A4A",lineHeight:1.4}}>{m.notes}</div>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Mi día */}
-      {!alertOnly&&(
-      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
-        <button onClick={()=>setMiDiaOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer"}}>
-          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <div style={{width:"30px",height:"30px",borderRadius:"8px",background:`linear-gradient(135deg,#1D4ED8,#7C3AED)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",flexShrink:0}}>📋</div>
-            <div style={{textAlign:"left"}}>
-              <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Mi día</div>
-              <div style={{fontSize:"11px",color:D.ink3}}>
-                {pendientes.length>0?`${pendientes.length} pendiente${pendientes.length>1?"s":""}`:completadas.length>0?"✓ Todo completado":"Sin tareas para hoy"}
-                {pendientesDeAyer.length>0&&<span style={{color:"#d97706",marginLeft:"6px"}}>· {pendientesDeAyer.length} de ayer</span>}
+      {/* Realizadas */}
+      <div>
+        {pendientes.length>0&&<div style={{fontSize:"11px",fontWeight:600,color:"#8A8A8A",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Historial</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          {realizadas.length===0&&<div style={{textAlign:"center",color:"#8A8A8A",fontSize:"12px",padding:"2rem",border:"1px dashed #E8E6E1",borderRadius:"12px"}}>Sin interacciones registradas</div>}
+          {realizadas.map(m=>(
+            <div key={m.id} style={{background:"#F8F7F4",borderRadius:"12px",padding:"12px 14px",border:"1px solid #E8E6E1"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
+                <span style={{fontSize:"11px",fontWeight:600,color:"#FFFFFF",background:m.type==="reunion"?"#E8500A":m.type==="llamado"?"#7C3AED":"#0891b2",padding:"2px 8px",borderRadius:"20px"}}>
+                  {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}
+                </span>
+                <span style={{fontSize:"11px",color:"#8A8A8A"}}>{formatDateShort(m.date)}</span>
+                {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
+                <div style={{flex:1}}/>
+                {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"12px",padding:"2px 6px"}}>×</button>}
               </div>
+              {m.subject&&<div style={{fontSize:"12px",fontWeight:500,color:"#1A1A1A",marginBottom:"4px"}}>📌 {m.subject}</div>}
+              {m.notes&&<div style={{fontSize:"12px",color:"#4A4A4A",lineHeight:1.5,marginBottom:"6px",maxHeight:"80px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{m.notes}</div>}
+              {summaries[m.id]&&<div style={{background:"#FFFFFF",borderRadius:"8px",padding:"8px 10px",fontSize:"11px",color:"#4A4A4A",borderLeft:"2px solid #E8500A",marginTop:"6px"}}><span style={{fontWeight:600,color:"#E8500A",marginRight:"4px"}}>Resumen IA:</span>{summaries[m.id]}</div>}
+              {m.fromDiio&&m.notes&&!summaries[m.id]&&<button onClick={()=>summarize(m)} disabled={summarizing===m.id} style={{marginTop:"4px",padding:"3px 10px",borderRadius:"7px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"11px",cursor:"pointer",color:"#4A4A4A"}}>{summarizing===m.id?"Resumiendo...":"✦ Resumir con IA"}</button>}
             </div>
-          </div>
-          <span style={{color:D.ink3,fontSize:"12px"}}>{miDiaOpen?"▲":"▼"}</span>
-        </button>
-        {miDiaOpen&&(
-          <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 16px"}}>
-            <div style={{display:"flex",flexDirection:"column",gap:"8px",marginBottom:"12px"}}>
-              <div style={{display:"flex",gap:"8px"}}>
-                <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTask();}} placeholder="¿Qué querés hacer hoy? (Enter para guardar)" style={{...iStyle,flex:1}}/>
-                <button onClick={addTask} disabled={!input.trim()} style={{padding:"9px 14px",borderRadius:"10px",border:"none",background:input.trim()?`linear-gradient(135deg,#1D4ED8,#7C3AED)`:"#E5E7EB",color:input.trim()?"white":"#9CA3AF",fontSize:"12px",cursor:input.trim()?"pointer":"default",fontWeight:600,flexShrink:0}}>+ Agregar</button>
-              </div>
-              <select value={selectedClient} onChange={e=>setSelectedClient(e.target.value)} style={{...iStyle,fontSize:"11px",color:selectedClient?D.ink:D.ink3}}>
-                <option value="">Sin cliente asociado (opcional)</option>
-                <optgroup label="Pipeline P1">{pipelineClients.filter(c=>c.stage==="Pipeline P1").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-                <optgroup label="Pipeline P2">{pipelineClients.filter(c=>c.stage==="Pipeline P2").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-                <optgroup label="Prospectos">{pipelineClients.filter(c=>c.stage==="Prospecto Activo").map(c=><option key={c.id} value={c.id}>{c.companyName}</option>)}</optgroup>
-              </select>
-            </div>
-            {pendientesDeAyer.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:"#d97706",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>⏳ Quedaron pendientes</div>{pendientesDeAyer.map(renderTask)}</div>)}
-            {pendientesDeHoy.length>0&&(<div style={{marginBottom:"10px"}}><div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Hoy</div>{pendientesDeHoy.map(renderTask)}</div>)}
-            {completadas.length>0&&(
-              <div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
-                  <div style={{fontSize:"10px",fontWeight:600,color:"#16a34a",textTransform:"uppercase",letterSpacing:"0.05em"}}>✓ Completadas</div>
-                  <button onClick={clearCompleted} style={{fontSize:"10px",color:D.ink3,background:"none",border:"none",cursor:"pointer"}}>Limpiar</button>
-                </div>
-                {completadas.map(renderTask)}
-              </div>
-            )}
-            {tasks.length===0&&<div style={{textAlign:"center",padding:"1.5rem",color:D.ink3,fontSize:"12px"}}>Sin tareas para hoy — agregá lo que querés hacer</div>}
-          </div>
-        )}
+          ))}
+        </div>
       </div>
-      )}
     </div>
   );
 }
 
-
-// --- AI Pendientes Panel ------------------------------------------------------
 function AIPendientesPanel({clients,onUpdateTasks,transcripts}:{clients:ClientRecord[];onUpdateTasks:(clientId:string,tasks:ClientTask[])=>void;transcripts:TranscriptInfo[]}){
   const [open,setOpen]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -988,14 +768,17 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
   );
 }
 // --- Prospecto Row -------------------------------------------------------------
-function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;contacts:ContactInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void}){
+function ProspectoRow({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+  const [showDetail,setShowDetail]=useState(false);
   const match=contacts.find(c=>c.company.toLowerCase()===client.companyName.toLowerCase());
+  const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
   return(
+    <>
     <div style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 14px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",transition:"box-shadow 0.15s"}}
       onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 2px 12px rgba(0,0,0,0.06)")}
       onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
       <div style={{flex:1,minWidth:0}}>
-        <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"2px"}}>{client.companyName}</div>
+        <button onClick={()=>setShowDetail(true)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"13px",fontWeight:600,color:D.ink,padding:0,textAlign:"left",marginBottom:"2px"}}>{client.companyName}</button>
         <div style={{fontSize:"11px",color:D.ink3,display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
           {match?.name&&<span>{match.name}</span>}
           {match?.phone&&<span>📞 {match.phone}</span>}
@@ -1004,10 +787,19 @@ function ProspectoRow({client,contacts,onEdit,onDelete}:{client:ClientRecord;con
         </div>
       </div>
       <div style={{display:"flex",gap:"4px",flexShrink:0}}>
+        <button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver historial">
+          📅{meetingCount>0?meetingCount:""}
+        </button>
         <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
         <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
       </div>
     </div>
+    {showDetail&&(
+      <Modal open={showDetail} title={`${client.companyName} — Historial`} onClose={()=>setShowDetail(false)} wide>
+        <ClientDetailModal client={client} transcripts={transcripts} onUpdateMeetings={(meetings)=>onUpdateMeetings(client.id,meetings)} onClose={()=>setShowDetail(false)}/>
+      </Modal>
+    )}
+    </>
   );
 }
 
@@ -1050,10 +842,11 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
 
     for(const client of clientesFiltrados){
       const acts:Array<{tipo:string;fecha:string;nota:string;pendiente?:boolean}>=[];
-      // Meetings manuales del mes
+      // Meetings del mes (realizados y agendados)
       for(const m of (client.meetings||[])){
         if(m.date>=desde&&m.date<=hasta){
-          acts.push({tipo:m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo",fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||""});
+          const tipo=m.pending?"🗓 Agendado":m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo";
+          acts.push({tipo,fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||"",pendiente:!!m.pending});
         }
       }
       // Diio del mes
@@ -1353,7 +1146,7 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
             <span style={{fontSize:"12px",color:D.ink3,fontWeight:400}}>· {items.length} clientes</span>
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
-            {items.length?items.map(c=><ProspectoRow key={c.id} client={c} contacts={contacts} onEdit={onEdit} onDelete={onDelete}/>):(
+            {items.length?items.map(c=><ProspectoRow key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings}/>):(
               <div style={{borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"1.5rem",textAlign:"center",fontSize:"12px",color:D.ink3}}>Sin clientes</div>
             )}
           </div>
