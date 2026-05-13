@@ -1415,8 +1415,8 @@ function ProyeccionMWpChart({clients}:{clients:ClientRecord[]}){
   const data=useMemo(()=>{
     const hoy=new Date();
     const meses:Array<{label:string;mes:string;firmado:number;probable:number;posible:number}>=[];
-    // 6 meses: 2 pasados + actual + 3 futuros
-    for(let i=-2;i<=3;i++){
+    // 2 meses pasados + actual + 12 futuros
+    for(let i=-2;i<=12;i++){
       const d=new Date(hoy.getFullYear(),hoy.getMonth()+i,1);
       const mes=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
       const label=monthLabel(mes);
