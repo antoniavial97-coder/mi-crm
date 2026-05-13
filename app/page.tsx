@@ -577,6 +577,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
           </div>
         </div>
       )}
+      {client.stageDate&&(
         <div style={{background:"var(--color-background-secondary,#F8F7F4)",borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
           <div style={{fontSize:"11px",color:"#8A8A8A"}}>Etapa actual:</div>
           <div style={{fontSize:"12px",fontWeight:600,color:"#E8500A"}}>{client.subStage||client.stage}</div>
