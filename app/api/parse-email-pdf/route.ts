@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
         "anthropic-beta": "pdfs-2024-09-25",
       },
       body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
+        model: "claude-sonnet-4-5",
         max_tokens: 4000,
         messages: [{
           role: "user",
@@ -29,19 +29,23 @@ export async function POST(req: NextRequest) {
             },
             {
               type: "text",
-              text: `Analiza este PDF de cadena de correos de Outlook.
+              text: `Analiza este PDF que contiene una cadena de correos electronicos exportada desde Outlook.
 
-CONTEXTO: El correo MAS RECIENTE aparece al INICIO del PDF. Los correos citados dentro de otro NO se extraen por separado.
+CONTEXTO CRITICO:
+- El correo MAS RECIENTE aparece al INICIO del PDF (pagina 1, arriba del todo). Este suele tener formato: "Desde", "Fecha", "Para", "CC" cada uno en linea separada. Es el correo principal y DEBES incluirlo.
+- Los correos mas antiguos aparecen despues con formato "De:", "Enviado:", "Para:", etc.
+- Los correos citados DENTRO de otro correo NO se extraen por separado.
 
-REGLAS:
-1. Lee todo el documento. Incluye siempre el primer correo (el mas reciente, al inicio).
-2. Extrae cada correo independiente una sola vez.
-3. Solo correos desde 09/03/2026 en adelante. Descarta los anteriores.
-4. Ordena por fecha ascendente (mas antiguo primero).
-5. Fechas en formato YYYY-MM-DD.
+REGLAS ESTRICTAS:
+1. Lee TODO el documento completo de principio a fin.
+2. El primer correo del PDF (el mas reciente) SIEMPRE debe incluirse si su fecha es >= 2026-03-09.
+3. Extrae cada correo independiente una sola vez. No dupliques.
+4. Solo correos desde el 09/03/2026 en adelante. Descarta los anteriores.
+5. Ordena por fecha ascendente (mas antiguo primero).
+6. Convierte todas las fechas a YYYY-MM-DD. Si el ano no esta claro, usa el contexto del hilo para determinarlo.
 
-Devuelve SOLO JSON sin markdown:
-[{"fecha":"YYYY-MM-DD","de":"remitente","para":"destinatario","asunto":"asunto","cuerpo":"resumen 1-2 oraciones"}]`
+Devuelve SOLO un JSON array sin markdown ni explicaciones:
+[{"fecha":"YYYY-MM-DD","de":"nombre o email del remitente","para":"nombre o email del destinatario principal","asunto":"asunto del correo","cuerpo":"resumen de 1-2 oraciones del contenido principal"}]`
             }
           ]
         }]
