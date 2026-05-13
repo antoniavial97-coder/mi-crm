@@ -20,7 +20,7 @@ type ClientRecord = {
   lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
   aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; ingressDate?: string;
   createdAtISO: string; updatedAtISO: string;
-  stageHistory?: StageChange[]; nextStep?: string;
+  stageHistory?: StageChange[]; nextStep?: string; aiStatus?: string; aiStatusDate?: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
@@ -169,6 +169,8 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     lastContactISO:(x as Record<string,unknown>).lastContactISO as string||"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),ingressDate:(x as Record<string,unknown>).ingressDate as string|undefined,
     stageHistory:Array.isArray((x as Record<string,unknown>).stageHistory)?(x as Record<string,unknown>).stageHistory as StageChange[]:undefined,
     nextStep:(x as Record<string,unknown>).nextStep as string|undefined,
+    aiStatus:(x as Record<string,unknown>).aiStatus as string|undefined,
+    aiStatusDate:(x as Record<string,unknown>).aiStatusDate as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -1071,17 +1073,40 @@ function PipelineGeneradoChart({clients}:{clients:ClientRecord[]}){
 }
 
 // --- Client Card -------------------------------------------------------------
-function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings,onUpdateNote}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
+function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeetings,onUpdateNote,onUpdateAIStatus}:{client:ClientRecord;contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateAIStatus:(id:string,status:string)=>void}){
   const [showDetail,setShowDetail]=useState(false);
-  const [editingNote,setEditingNote]=useState(false);
-  const [noteVal,setNoteVal]=useState(client.nextAction);
+  const [loadingStatus,setLoadingStatus]=useState(false);
   const isSigned=client.subStage==="Contrato firmado";
-  const isPresentacion=client.subStage==="Presentación final";
   const closingD=client.subStage&&client.subStage!=="Contrato firmado"?closingDate(client.subStage,client.stageDate):null;
   const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
   const daysInStage=client.stageDate?Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24)):null;
 
-  function saveNote(){onUpdateNote(client.id,noteVal);setEditingNote(false);}
+  async function generarStatus(){
+    setLoadingStatus(true);
+    const clientTranscripts=transcripts
+      .filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase())
+      .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
+      .map(t=>`[Diio ${t.date}] ${t.transcript?.substring(0,400)||""}`);
+    const meetings=(client.meetings||[]).filter(m=>!m.fromDiio)
+      .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
+      .map(m=>`[${m.type} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,200)||""}`);
+    try{
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:client.companyName,
+          stage:client.subStage||client.stage,
+          comment:`Genera UN resumen ejecutivo muy breve (máximo 2 oraciones) del estado actual de esta oportunidad comercial. Basate SOLO en el historial de reuniones y comunicaciones. Sé específico y directo. No menciones el nombre de la empresa ni la etapa, solo el estado de la negociación.`,
+          transcripts:[...clientTranscripts,...meetings]
+        })
+      });
+      const data=await res.json() as {tasks?:string[]};
+      const status=(data.tasks||[])[0]||"";
+      if(status)onUpdateAIStatus(client.id,status);
+    }catch{}
+    setLoadingStatus(false);
+  }
 
   return(
     <>
@@ -1128,25 +1153,17 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
         <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>MWp</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.mwp.toFixed(2)}</div></div>
         <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>Prob.</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div></div>
       </div>
-      {/* Nota rápida inline */}
-      <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px",borderLeft:`2px solid ${D.border}`,cursor:"pointer"}} onClick={()=>!editingNote&&setEditingNote(true)}>
-        <div style={{fontSize:"10px",color:D.ink3,marginBottom:"2px",display:"flex",justifyContent:"space-between"}}>
-          <span>Comentario</span>
-          {!editingNote&&<span style={{color:D.accent,fontSize:"9px"}}>✎ editar</span>}
+      {/* Status IA */}
+      <div style={{background:D.bg,borderRadius:"8px",padding:"8px 10px",borderLeft:`2px solid ${client.aiStatus?"#7C3AED33":D.border}`}}>
+        <div style={{fontSize:"10px",color:D.ink3,marginBottom:"3px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontWeight:500}}>Estado IA {client.aiStatusDate&&<span style={{fontWeight:400}}>· {formatDateShort(client.aiStatusDate)}</span>}</span>
+          <button onClick={generarStatus} disabled={loadingStatus} style={{background:"none",border:"none",cursor:loadingStatus?"default":"pointer",fontSize:"10px",color:"#7C3AED",padding:0,fontWeight:500}}>
+            {loadingStatus?"⏳":"✦ "}{client.aiStatus?"Actualizar":"Generar"}
+          </button>
         </div>
-        {editingNote?(
-          <div onClick={e=>e.stopPropagation()}>
-            <textarea value={noteVal} onChange={e=>setNoteVal(e.target.value)} rows={2} style={{...iStyle,fontSize:"12px",resize:"none",marginBottom:"6px"}} autoFocus onKeyDown={e=>{if(e.key==="Enter"&&e.metaKey)saveNote();if(e.key==="Escape"){setNoteVal(client.nextAction);setEditingNote(false);}}}/>
-            <div style={{display:"flex",gap:"6px",justifyContent:"flex-end"}}>
-              <button onClick={()=>{setNoteVal(client.nextAction);setEditingNote(false);}} style={{padding:"3px 10px",borderRadius:"6px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
-              <button onClick={saveNote} style={{padding:"3px 10px",borderRadius:"6px",border:"none",background:D.accent,fontSize:"11px",cursor:"pointer",color:D.white,fontWeight:600}}>Guardar</button>
-            </div>
-          </div>
-        ):(
-          <div style={{fontSize:"12px",color:client.nextAction?D.ink2:D.ink3,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>
-            {client.nextAction||"Click para agregar comentario…"}
-          </div>
-        )}
+        <div style={{fontSize:"12px",color:client.aiStatus?D.ink2:D.ink3,lineHeight:1.4,fontStyle:client.aiStatus?"normal":"italic"}}>
+          {loadingStatus?"Analizando...":client.aiStatus||"Sin status — click en ✦ Generar"}
+        </div>
       </div>
     </div>
     {showDetail&&(
@@ -1536,7 +1553,7 @@ function ConversionRate({clients}:{clients:ClientRecord[]}){
   );
 }
 
-function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateLastContact,onMarkContact,recentContacts}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>}){
+function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateLastContact,onMarkContact,recentContacts}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;onUpdateAIStatus:(id:string,status:string)=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
   const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
   const bySubStage=useMemo(()=>{
@@ -1577,7 +1594,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
                 <div style={{fontSize:"11px",color:D.ink3}}>{items.length} cliente{items.length!==1?"s":""}</div>
                 {!isSigned&&<span style={{marginLeft:"auto",fontSize:"11px",fontWeight:700,color:D.accent,background:`${D.accent}12`,padding:"3px 9px",borderRadius:"20px"}}>{SUBSTAGE_PROB[sub]}%</span>}
               </div>
-              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
+              {items.length?(<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>{items.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote} onUpdateAIStatus={onUpdateAIStatus}/>)}</div>):(<div style={{borderRadius:"10px",border:`1px dashed ${D.border}`,padding:"1rem",fontSize:"12px",color:D.ink3,textAlign:"center"}}>Sin clientes</div>)}
             </div>
           );
         })}
@@ -1586,7 +1603,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
   );
 }
 
-function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void}){
+function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateAIStatus:(id:string,status:string)=>void}){
   const p2=clients.filter(c=>c.stage==="Pipeline P2");
   const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
   const p2Filtered=useMemo(()=>p2.filter(c=>{
@@ -1607,7 +1624,7 @@ function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
       <FiltrosPipeline subStages={[]} onFilter={setFiltro}/>
       
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
-        {p2Filtered.length?p2Filtered.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes{filtro.soloSf||filtro.minMwp?" con estos filtros":" en Pipeline P2"}</div>)}
+        {p2Filtered.length?p2Filtered.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote} onUpdateAIStatus={onUpdateAIStatus}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes{filtro.soloSf||filtro.minMwp?" con estos filtros":" en Pipeline P2"}</div>)}
       </div>
     </div>
   );
@@ -1849,7 +1866,7 @@ export default function Home(){
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
-          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep}:c;
+          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep,aiStatus:e.aiStatus,aiStatusDate:e.aiStatusDate}:c;
         });
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
       }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
@@ -1880,6 +1897,7 @@ export default function Home(){
     updateClientLastContact(clientId);
   }
   function updateClientNote(clientId:string,note:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c));}
+  function updateClientAIStatus(clientId:string,status:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
   function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||""});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
@@ -2049,8 +2067,8 @@ export default function Home(){
           </div>
         )}
         {activeTab==="semana"&&<SemanaTab clients={activeClients} transcripts={transcripts} onUpdateTasks={updateClientTasks}/>}
-        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts}/>}
-        {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote}/>}
+        {activeTab==="pipeline1"&&<Pipeline1Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} onUpdateAIStatus={updateClientAIStatus}/>}
+        {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote} onUpdateAIStatus={updateClientAIStatus}/>}
         {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
       </div>
