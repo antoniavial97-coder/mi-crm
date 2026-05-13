@@ -1935,9 +1935,14 @@ export default function Home(){
   useEffect(()=>{loadFromSheet();},[loadFromSheet]);
   useEffect(()=>{if(sheetStatus!=="idle")localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));},[clients,sheetStatus]);
 
-  function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c));}
+  function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){
-    setClients(prev=>prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c));
+    setClients(prev=>{
+      const updated=prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c);
+      // Guardar inmediatamente en localStorage sin esperar el useEffect
+      try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(updated));}catch{}
+      return updated;
+    });
     // Marcar como contacto reciente usando nombre empresa
     const client=clients.find(c=>c.id===clientId);
     if(client){
@@ -1955,8 +1960,8 @@ export default function Home(){
     saveRecentContact(key,todayISO());
     updateClientLastContact(clientId);
   }
-  function updateClientNote(clientId:string,note:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c));}
-  function updateClientAIStatus(clientId:string,status:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c));}
+  function updateClientNote(clientId:string,note:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
+  function updateClientAIStatus(clientId:string,status:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
   function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||""});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
