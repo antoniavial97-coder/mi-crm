@@ -544,7 +544,63 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
   }
 
-  function markDone(id:string){
+  const [parsingPDF,setParsingPDF]=useState(false);
+  const [pdfError,setPdfError]=useState("");
+  const fileInputRef=useRef<HTMLInputElement>(null);
+
+  async function handlePDFUpload(e:React.ChangeEvent<HTMLInputElement>){
+    const file=e.target.files?.[0];
+    if(!file)return;
+    setParsingPDF(true);setPdfError("");
+    try{
+      // Convert PDF to base64
+      const base64=await new Promise<string>((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res((r.result as string).split(",")[1]);
+        r.onerror=rej;
+        r.readAsDataURL(file);
+      });
+      // Send to Claude API to extract emails
+      const response=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:2000,
+          messages:[{
+            role:"user",
+            content:[
+              {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
+              {type:"text",text:`Extrae todos los correos de esta cadena de email. Para cada correo devuelve un JSON array con objetos: {fecha: "YYYY-MM-DD", asunto: "string", cuerpo: "resumen breve de 1-2 oraciones del contenido"}. Ordena por fecha ascendente. Solo responde el JSON, sin markdown ni explicaciones.`}
+            ]
+          }]
+        })
+      });
+      const data=await response.json() as {content?:Array<{type:string;text?:string}>};
+      const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text||"").join("");
+      let emails:Array<{fecha:string;asunto:string;cuerpo:string}>=[];
+      try{emails=JSON.parse(text.replace(/```json|```/g,"").trim());}
+      catch{setPdfError("No se pudo parsear el PDF. Intentá de nuevo.");setParsingPDF(false);return;}
+
+      // Add emails as meetings, skip duplicates
+      const existing=new Set(meetings.map(m=>`${m.date}|${m.subject}`));
+      const nuevos:Meeting[]=[];
+      for(const em of emails){
+        const key=`${em.fecha}|${em.asunto}`;
+        if(!existing.has(key)){
+          nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:em.cuerpo,fromDiio:false,pending:false});
+          existing.add(key);
+        }
+      }
+      if(nuevos.length===0){setPdfError("No se encontraron correos nuevos — ya estaban todos registrados.");setParsingPDF(false);return;}
+      const updated=[...meetings,...nuevos].sort((a,b)=>a.date.localeCompare(b.date));
+      setMeetings(updated);
+      onUpdateMeetings(updated.filter(x=>!x.fromDiio));
+      setPdfError(`✓ ${nuevos.length} correo${nuevos.length>1?"s":"" } importado${nuevos.length>1?"s":""}`);
+    }catch{setPdfError("Error al procesar el PDF.");}
+    setParsingPDF(false);
+    if(fileInputRef.current)fileInputRef.current.value="";
+  }
     const updated=meetings.map(m=>m.id===id?{...m,pending:false}:m);
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
@@ -562,7 +618,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   }
 
   const pendientes=meetings.filter(m=>m.pending&&!m.fromDiio);
-  const realizadas=meetings.filter(m=>!m.pending);
+  const realizadas=meetings.filter(m=>!m.pending).sort((a,b)=>a.date.localeCompare(b.date));
 
   return(
     <div>
@@ -604,7 +660,14 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"1rem"}}>
         <div style={{fontSize:"13px",color:"#8A8A8A"}}>{realizadas.length} realizadas · {pendientes.length} agendadas</div>
-        <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:"#1A1A1A",color:"#FFFFFF",fontSize:"12px",cursor:"pointer",fontWeight:600}}>+ Agregar</button>
+        <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+          {pdfError&&<span style={{fontSize:"11px",color:pdfError.startsWith("✓")?"#16a34a":"#dc2626"}}>{pdfError}</span>}
+          <label style={{padding:"7px 12px",borderRadius:"9px",border:"1px solid #DDD6FE",background:"white",fontSize:"12px",cursor:"pointer",color:"#7C3AED",fontWeight:500,display:"flex",alignItems:"center",gap:"5px"}}>
+            {parsingPDF?"⏳ Importando...":"📎 PDF correos"}
+            <input ref={fileInputRef} type="file" accept="application/pdf" onChange={handlePDFUpload} style={{display:"none"}} disabled={parsingPDF}/>
+          </label>
+          <button onClick={()=>setShowForm(s=>!s)} style={{padding:"7px 14px",borderRadius:"9px",border:"none",background:"#1A1A1A",color:"#FFFFFF",fontSize:"12px",cursor:"pointer",fontWeight:600}}>+ Agregar</button>
+        </div>
       </div>
 
       {showForm&&(
@@ -1553,7 +1616,7 @@ function ConversionRate({clients}:{clients:ClientRecord[]}){
   );
 }
 
-function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateLastContact,onMarkContact,recentContacts}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;onUpdateAIStatus:(id:string,status:string)=>void}){
+function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateLastContact,onMarkContact,recentContacts,onUpdateAIStatus}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;onUpdateAIStatus:(id:string,status:string)=>void}){
   const p1=clients.filter(c=>c.stage==="Pipeline P1");
   const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
   const bySubStage=useMemo(()=>{
@@ -1603,7 +1666,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
   );
 }
 
-function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateAIStatus:(id:string,status:string)=>void}){
+function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTasks,onUpdateMeetings,onUpdateNote,onUpdateAIStatus}:{clients:ClientRecord[];contacts:ContactInfo[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onDelete:(id:string)=>void;onUpdateTasks:(id:string,tasks:ClientTask[])=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateNote:(id:string,note:string)=>void;onUpdateAIStatus:(id:string,status:string)=>void}){
   const p2=clients.filter(c=>c.stage==="Pipeline P2");
   const [filtro,setFiltro]=useState({subStage:"",minMwp:0,soloSf:false});
   const p2Filtered=useMemo(()=>p2.filter(c=>{
