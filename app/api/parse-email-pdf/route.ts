@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Increase body size limit for App Router
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   try {
-    // Check content length first
-    const contentLength = req.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) {
-      return NextResponse.json({ error: "PDF demasiado grande. Máximo 10MB." }, { status: 413 });
-    }
-
+    const fileSizeHeader = req.headers.get("x-file-size");
     const body = await req.json() as { pdfBase64?: string };
     const pdfBase64 = body.pdfBase64;
     if (!pdfBase64) return NextResponse.json({ error: "No PDF provided" }, { status: 400 });
-
-    // Check base64 size (~75% of original)
-    if (pdfBase64.length > 13 * 1024 * 1024) {
-      return NextResponse.json({ error: "PDF demasiado grande. Intentá con uno más pequeño." }, { status: 413 });
-    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "API key not configured" }, { status: 500 });
@@ -32,7 +21,7 @@ export async function POST(req: NextRequest) {
         "anthropic-beta": "pdfs-2024-09-25",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 2000,
         messages: [{
           role: "user",
@@ -58,7 +47,7 @@ export async function POST(req: NextRequest) {
 
     let emails: unknown[] = [];
     try { emails = JSON.parse(text.replace(/```json|```/g, "").trim()); }
-    catch { return NextResponse.json({ error: `Parse error: ${text.substring(0, 200)}` }, { status: 500 }); }
+    catch { return NextResponse.json({ error: `Parse error: ${text.substring(0, 300)}` }, { status: 500 }); }
 
     return NextResponse.json({ emails });
   } catch (e) {
