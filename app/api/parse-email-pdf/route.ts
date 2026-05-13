@@ -4,36 +4,11 @@ export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { pdfBase64?: string; pdfText?: string };
+    const body = await req.json() as { pdfBase64?: string };
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "API key not configured" }, { status: 500 });
 
-    let messageContent: unknown[];
-
-    if (body.pdfBase64) {
-      messageContent = [
-        {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: body.pdfBase64 }
-        },
-        {
-          type: "text",
-          text: `Analiza este PDF de cadena de correos de Outlook.
-
-REGLAS:
-1. El correo MÁS RECIENTE aparece al INICIO del PDF. Inclúyelo siempre.
-2. Extrae cada correo independiente. NO extraigas correos citados dentro de otros.
-3. Solo correos desde el 09/03/2026. Descarta los anteriores.
-4. Ordena por fecha ascendente.
-5. Fechas en formato YYYY-MM-DD.
-
-Devuelve SOLO JSON sin markdown:
-[{"fecha":"YYYY-MM-DD","de":"remitente","para":"destinatario","asunto":"asunto","cuerpo":"resumen 1-2 oraciones"}]`
-        }
-      ];
-    } else {
-      return NextResponse.json({ error: "No content provided" }, { status: 400 });
-    }
+    if (!body.pdfBase64) return NextResponse.json({ error: "No PDF provided" }, { status: 400 });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -46,7 +21,35 @@ Devuelve SOLO JSON sin markdown:
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
         max_tokens: 4000,
-        messages: [{ role: "user", content: messageContent }]
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: body.pdfBase64 }
+            },
+            {
+              type: "text",
+              text: `Analiza este PDF que contiene una cadena de correos electrónicos exportada desde Outlook.
+
+CONTEXTO CRÍTICO:
+- El correo MÁS RECIENTE aparece al INICIO del PDF (página 1, arriba del todo). Este suele tener formato: "Desde", "Fecha", "Para", "CC" cada uno en línea separada. Es el correo principal y DEBES incluirlo.
+- Los correos más antiguos aparecen después con formato "De:", "Enviado:", "Para:", etc.
+- Los correos citados DENTRO de otro correo NO se extraen por separado.
+
+REGLAS ESTRICTAS:
+1. Lee TODO el documento completo de principio a fin.
+2. El primer correo del PDF (el más reciente) SIEMPRE debe incluirse si su fecha es >= 2026-03-09.
+3. Extrae cada correo independiente una sola vez. No dupliques.
+4. Solo correos desde el 09/03/2026 en adelante. Descarta los anteriores.
+5. Ordena por fecha ascendente (más antiguo primero).
+6. Convierte todas las fechas a YYYY-MM-DD.
+
+Devuelve SOLO un JSON array sin markdown ni explicaciones:
+[{"fecha":"YYYY-MM-DD","de":"nombre o email del remitente","para":"nombre o email del destinatario principal","asunto":"asunto del correo","cuerpo":"resumen de 1-2 oraciones del contenido principal"}]`
+            }
+          ]
+        }]
       })
     });
 
