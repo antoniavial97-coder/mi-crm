@@ -1065,7 +1065,7 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
   const [noteVal,setNoteVal]=useState(client.nextAction);
   const isSigned=client.subStage==="Contrato firmado";
   const isPresentacion=client.subStage==="Presentación final";
-  const closingD=isPresentacion&&client.stageDate?closingDate(client.subStage,client.stageDate):null;
+  const closingD=client.subStage&&client.subStage!=="Contrato firmado"?closingDate(client.subStage,client.stageDate):null;
   const meetingCount=(client.meetings||[]).length+transcripts.filter(t=>t.company.toLowerCase()===client.companyName.toLowerCase()).length;
   const daysInStage=client.stageDate?Math.floor((new Date().getTime()-new Date(client.stageDate).getTime())/(1000*60*60*24)):null;
 
@@ -1669,7 +1669,7 @@ function PerdidosTab({clients}:{clients:ClientRecord[]}){
 
 // --- Edit/Create Modal Form ---------------------------------------------------
 type ClientDraft=Omit<ClientRecord,"id"|"createdAtISO"|"updatedAtISO">;
-const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[],meetings:[]};
+const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[],meetings:[],nextStep:""};
 
 function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtract}:{draft:ClientDraft;setDraft:React.Dispatch<React.SetStateAction<ClientDraft>>;onSave:()=>void;onCancel:()=>void;extractTasksLoading:boolean;onExtract:()=>void}){
   const prob=draft.stage==="Pipeline P2"?5:draft.stage==="Pipeline P1"&&draft.subStage?SUBSTAGE_PROB[draft.subStage]:0;
@@ -1700,7 +1700,7 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
             Próximo paso concreto
             <span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>¿Qué hay que hacer para avanzar?</span>
           </div>
-          <input value={(draft as {nextStep?:string}).nextStep||""} onChange={e=>setDraft(d=>({...d,nextStep:e.target.value} as typeof d))} style={{...iStyle,borderLeft:`3px solid ${D.accent}`}} placeholder="Ej: Enviar propuesta técnica actualizada con BESS"/>
+          <input value={draft.nextStep||""} onChange={e=>setDraft(d=>({...d,nextStep:e.target.value}))} style={{...iStyle,borderLeft:`3px solid ${D.accent}`}} placeholder="Ej: Enviar propuesta técnica actualizada con BESS"/>
         </div>
         <div style={{gridColumn:"1/-1"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
@@ -1788,7 +1788,7 @@ export default function Home(){
   }
   function updateClientNote(clientId:string,note:string){setClients(prev=>prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c));}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
-  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[]});setModalOpen(true);}
+  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||""});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
   function saveClient(){
     if(!draft.companyName.trim()){window.alert("Ingresa el nombre de la empresa.");return;}
