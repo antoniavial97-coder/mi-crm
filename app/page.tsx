@@ -1936,8 +1936,18 @@ export default function Home(){
     }catch{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("error");}
   },[]);
 
-  useEffect(()=>{loadFromSheet();},[loadFromSheet]);
-  useEffect(()=>{if(sheetStatus!=="idle")localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));},[clients,sheetStatus]);
+  useEffect(()=>{
+    // Solo cargar desde localStorage al inicio, NO hacer sync automático
+    const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
+    if(local.length>0){
+      setClients(local);
+      setSheetStatus("ok");
+    } else {
+      // Primera vez — cargar del Sheet
+      loadFromSheet();
+    }
+  },[]);
+  useEffect(()=>{if(clients.length>0){localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));}},[clients]);
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){
