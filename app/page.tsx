@@ -526,6 +526,9 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:today,type:"reunion",subject:"",notes:""});
   const [summarizing,setSummarizing]=useState<string|null>(null);
   const [summaries,setSummaries]=useState<Record<string,string>>({});
+  const [parsingPDF,setParsingPDF]=useState(false);
+  const [pdfError,setPdfError]=useState("");
+  const fileInputRef=useRef<HTMLInputElement>(null);
 
   function addMeeting(){
     if(!newMeeting.notes.trim()&&!newMeeting.subject.trim())return;
@@ -543,10 +546,6 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
   }
-
-  const [parsingPDF,setParsingPDF]=useState(false);
-  const [pdfError,setPdfError]=useState("");
-  const fileInputRef=useRef<HTMLInputElement>(null);
 
   async function handlePDFUpload(e:React.ChangeEvent<HTMLInputElement>){
     const file=e.target.files?.[0];
