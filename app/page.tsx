@@ -50,14 +50,26 @@ const P1_SUBSTAGE_ORDER: SubStage[] = [
 ];
 const STAGES: Stage[] = ["Prospecto Pasivo","Prospecto Activo","Pipeline P2","Pipeline P1","Perdido"];
 const D = {
-  bg:"#F8F7F4", white:"#FFFFFF", ink:"#1A1A1A", ink2:"#4A4A4A", ink3:"#8A8A8A",
-  border:"#E8E6E1", accent:"#E8500A", accentY:"#F5B800",
-  signedBg:"#F0FBF4", signedBorder:"#9FD4AF",
-  alarmBg:"#FFF5F5", alarmBorder:"#FCA5A5",
-  lostBg:"#FFF5F5", lostBorder:"#FCA5A5",
+  bg:"#F5F4F0", white:"#FFFFFF", ink:"#111827", ink2:"#374151", ink3:"#9CA3AF",
+  border:"#E5E7EB", accent:"#E8500A", accentY:"#F5B800",
+  accentLight:"#FFF4EF", accentBorder:"#FBD0BC",
+  signedBg:"#F0FDF4", signedBorder:"#86EFAC",
+  alarmBg:"#FEF2F2", alarmBorder:"#FECACA",
+  lostBg:"#FEF2F2", lostBorder:"#FECACA",
+  shadow:"0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
+  shadowMd:"0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
+  shadowLg:"0 20px 60px rgba(0,0,0,0.12)",
 };
-const fontStyle = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap'); *{font-family:'DM Sans',sans-serif;}`;
-const iStyle: React.CSSProperties = {width:"100%",padding:"9px 12px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",color:D.ink,outline:"none",boxSizing:"border-box"};
+const fontStyle = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
+  *{font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
+  body{background:#F5F4F0;}
+  ::-webkit-scrollbar{width:5px;height:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:10px;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}`;
+const iStyle: React.CSSProperties = {width:"100%",padding:"9px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",color:D.ink,outline:"none",boxSizing:"border-box",transition:"border-color 0.15s",boxShadow:D.shadow};
 
 // --- Utils --------------------------------------------------------------------
 function todayISO(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
@@ -1718,6 +1730,87 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
   );
 }
 
+// --- Resumen Semanal IA -------------------------------------------------------
+const RESUMEN_KEY = "solar-crm:resumen-semanal";
+type ResumenData = { fecha: string; texto: string; };
+
+function ResumenSemanal({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+  const [open,setOpen]=useState(false);
+  const [resumen,setResumen]=useState<ResumenData|null>(()=>{
+    try{const r=localStorage.getItem(RESUMEN_KEY);return r?JSON.parse(r):null;}catch{return null;}
+  });
+  const [loading,setLoading]=useState(false);
+  const hoy=todayISO();
+  const esLunes=new Date().getDay()===1;
+  const esNuevo=!resumen||resumen.fecha<hoy;
+
+  async function generar(){
+    setLoading(true);
+    const p1=clients.filter(c=>c.stage==="Pipeline P1");
+    const activos=clients.filter(c=>c.stage==="Pipeline P2"||c.stage==="Prospecto Activo");
+    const sinContacto=p1.filter(c=>{
+      const ultima=getLastActivity(c,transcripts,{});
+      if(!ultima)return true;
+      return Math.floor((new Date().getTime()-ultima.getTime())/(1000*60*60*24))>=14;
+    });
+    const context=`
+Pipeline P1 (${p1.length} clientes): ${p1.map(c=>`${c.companyName} (${c.subStage||"sin etapa"}, ${c.mwp}MWp, comentario: ${c.nextAction||"ninguno"})`).join("; ")}
+Sin contacto +14 días: ${sinContacto.map(c=>c.companyName).join(", ")||"ninguno"}
+Pipeline P2 y Prospectos activos: ${activos.map(c=>c.companyName).join(", ")||"ninguno"}
+Reuniones recientes Diio: ${transcripts.slice(0,5).map(t=>`${t.company} (${t.date})`).join(", ")||"ninguna"}
+    `.trim();
+    try{
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:"Resumen semanal",
+          stage:"Sales Manager",
+          comment:`Genera un resumen ejecutivo semanal breve (máximo 4 párrafos cortos) para una vendedora de energía solar llamada Antonia. Incluye: 1) Estado general del pipeline, 2) Clientes que necesitan atención urgente, 3) Oportunidades más prometedoras de la semana, 4) Recomendación de foco para esta semana. Sé específico con nombres de clientes. Tono profesional pero directo.`,
+          transcripts:[context]
+        })
+      });
+      const data=await res.json() as {tasks?:string[]};
+      const texto=(data.tasks||[]).join("\n\n");
+      const nuevo={fecha:hoy,texto};
+      setResumen(nuevo);
+      localStorage.setItem(RESUMEN_KEY,JSON.stringify(nuevo));
+    }catch{}
+    setLoading(false);
+  }
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${esNuevo?"#7C3AED44":D.border}`,borderRadius:"16px",overflow:"hidden",boxShadow:D.shadow}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
+          <div style={{width:"36px",height:"36px",borderRadius:"10px",background:"linear-gradient(135deg,#7C3AED,#A855F7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>✦</div>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Resumen semanal IA</div>
+            <div style={{fontSize:"11px",color:D.ink3}}>
+              {resumen?`Generado el ${formatDateShort(resumen.fecha)}`:"Sin resumen esta semana"}
+              {esNuevo&&resumen&&<span style={{marginLeft:"8px",color:"#7C3AED",fontWeight:500}}>· Actualizar</span>}
+            </div>
+          </div>
+        </div>
+        <span style={{color:D.ink3,fontSize:"11px"}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&(
+        <div style={{borderTop:`1px solid ${D.border}`,padding:"16px 18px"}}>
+          {resumen&&(
+            <div style={{fontSize:"13px",color:D.ink2,lineHeight:1.7,marginBottom:"14px",whiteSpace:"pre-wrap"}}>{resumen.texto}</div>
+          )}
+          {!resumen&&!loading&&(
+            <div style={{textAlign:"center",padding:"1rem",color:D.ink3,fontSize:"12px",marginBottom:"12px"}}>Generá tu resumen semanal para ver el estado de tu pipeline</div>
+          )}
+          <button onClick={generar} disabled={loading} style={{padding:"8px 16px",borderRadius:"8px",border:"none",background:loading?"#E9D5FF":"linear-gradient(135deg,#7C3AED,#A855F7)",color:loading?"#7C3AED":"white",fontSize:"12px",fontWeight:600,cursor:loading?"default":"pointer",display:"flex",alignItems:"center",gap:"6px"}}>
+            {loading?<><span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>Analizando pipeline...</>:<>✦ {resumen?"Regenerar resumen":"Generar resumen semanal"}</>}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const [clients,setClients]=useState<ClientRecord[]>([]);
@@ -1884,28 +1977,32 @@ export default function Home(){
   return(
     <div style={{minHeight:"100dvh",background:D.bg}}>
       <style>{fontStyle}</style>
-      <header style={{background:D.white,borderBottom:`1px solid ${D.border}`,position:"sticky",top:0,zIndex:20}}>
-        <div style={{maxWidth:"1280px",margin:"0 auto",padding:"0 2rem"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0.75rem 0",gap:"16px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"14px"}}>
-              <img src={LOGO_B64} alt="Solarity" style={{height:"36px",width:"auto"}}/>
-              <div style={{width:"1px",height:"24px",background:D.border}}/>
+      <header style={{background:D.white,borderBottom:`1px solid ${D.border}`,position:"sticky",top:0,zIndex:20,boxShadow:D.shadow}}>
+        <div style={{maxWidth:"1400px",margin:"0 auto",padding:"0 2rem"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0.875rem 0",gap:"16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
+              <img src={LOGO_B64} alt="Solarity" style={{height:"32px",width:"auto"}}/>
+              <div style={{width:"1px",height:"20px",background:D.border}}/>
               <div>
-                <div style={{fontSize:"14px",fontWeight:600,color:D.ink,fontFamily:"'DM Serif Display',serif"}}>CRM de Ventas Antonia Vial</div>
-                <div style={{fontSize:"10px",color:D.ink3,letterSpacing:"0.06em",textTransform:"uppercase"}}>Solarity · Meta 2026: {ANNUAL_GOAL_MWP} MWp</div>
+                <div style={{fontSize:"14px",fontWeight:600,color:D.ink,letterSpacing:"-0.01em"}}>CRM de Ventas · Antonia Vial</div>
+                <div style={{fontSize:"10px",color:D.ink3,letterSpacing:"0.06em",textTransform:"uppercase",marginTop:"1px"}}>Solarity · Meta 2026: {ANNUAL_GOAL_MWP} MWp</div>
               </div>
             </div>
             <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-              <button onClick={exportToExcel} style={{padding:"6px 13px",borderRadius:"9px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2,fontWeight:500}}>↓ Excel</button>
-              <button onClick={loadFromSheet} disabled={sheetStatus==="loading"} style={{padding:"6px 13px",borderRadius:"9px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:sheetStatus==="ok"?"#166534":sheetStatus==="error"?"#dc2626":D.ink2,fontWeight:500}}>
-                {sheetStatus==="loading"?"⏳ Sync…":sheetStatus==="ok"?"✓ Sincronizado":sheetStatus==="error"?"⚠ Error · Reintentar":"↻ Cargar"}
+              <button onClick={exportToExcel} style={{padding:"7px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2,fontWeight:500,display:"flex",alignItems:"center",gap:"5px",boxShadow:D.shadow}}>
+                <span>↓</span> Excel
               </button>
-              <button onClick={openCreate} style={{padding:"7px 15px",borderRadius:"9px",border:"none",background:D.ink,fontSize:"12px",cursor:"pointer",color:D.white,fontWeight:600}}>+ Cliente</button>
+              <button onClick={loadFromSheet} disabled={sheetStatus==="loading"} style={{padding:"7px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:sheetStatus==="ok"?"#16a34a":sheetStatus==="error"?"#dc2626":D.ink2,fontWeight:500,boxShadow:D.shadow}}>
+                {sheetStatus==="loading"?"⏳ Sync…":sheetStatus==="ok"?"✓ Sincronizado":sheetStatus==="error"?"⚠ Error":"↻ Cargar"}
+              </button>
+              <button onClick={openCreate} style={{padding:"7px 16px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:D.white,fontWeight:600,boxShadow:`0 2px 8px ${D.accent}44`,display:"flex",alignItems:"center",gap:"5px"}}>
+                + Cliente
+              </button>
             </div>
           </div>
           <div style={{display:"flex",gap:"0",borderTop:`1px solid ${D.border}`}}>
             {tabs.map(([tab,label])=>(
-              <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"0.65rem 1.25rem",border:"none",background:"none",cursor:"pointer",fontSize:"13px",fontWeight:activeTab===tab?600:400,color:activeTab===tab?(tab==="perdidos"?"#dc2626":D.accent):D.ink3,borderBottom:activeTab===tab?`2px solid ${tab==="perdidos"?"#dc2626":D.accent}`:"2px solid transparent",transition:"all 0.15s"}}>
+              <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"0.7rem 1.25rem",border:"none",background:"none",cursor:"pointer",fontSize:"12px",fontWeight:activeTab===tab?600:400,color:activeTab===tab?(tab==="perdidos"?"#dc2626":D.accent):D.ink3,borderBottom:activeTab===tab?`2px solid ${tab==="perdidos"?"#dc2626":D.accent}`:"2px solid transparent",transition:"all 0.15s",letterSpacing:"0.01em"}}>
                 {label}
               </button>
             ))}
@@ -1913,37 +2010,38 @@ export default function Home(){
         </div>
       </header>
 
-      <div style={{maxWidth:"1280px",margin:"0 auto",padding:"2rem"}}>
+      <div style={{maxWidth:"1400px",margin:"0 auto",padding:"1.75rem 2rem"}}>
         {activeTab==="dashboard"&&(
-          <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"10px"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:"1.25rem",animation:"fadeIn 0.2s ease"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"12px"}}>
               {[
                 {l:"Pipeline total CRM",v:metrics.mwpTotal.toFixed(2),u:"MWp",accent:true},
-                {l:"Pipeline Salesforce",v:metrics.mwpSalesforce.toFixed(2),u:`MWp · ${metrics.countSalesforce} proyectos`,sf:true},
-                {l:"MWp Pipeline P1",v:metrics.mwpP1.toFixed(2),u:"MWp activos"},
-                {l:"Probable cierre 2026",v:metrics.mwpProb2026.toFixed(2),u:"MWp pond."},
+                {l:"Pipeline Salesforce",v:metrics.mwpSalesforce.toFixed(2),u:`${metrics.countSalesforce} proyectos`,sf:true},
+                {l:"MWp Pipeline P1",v:metrics.mwpP1.toFixed(2),u:"activos"},
+                {l:"Probable cierre 2026",v:metrics.mwpProb2026.toFixed(2),u:"ponderado"},
                 {l:"MWp firmado",v:metrics.mwpFirmado.toFixed(2),u:metrics.mwpFirmado>=ANNUAL_GOAL_MWP?"🎉 Meta cumplida":"cerrados"},
               ].map((m,i)=>(
-                <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean;sf?:boolean}).accent?`${D.accent}44`:(m as {sf?:boolean}).sf?"#BFDBFE":D.border}`,borderRadius:"14px",padding:"1.1rem",borderLeft:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:(m as {sf?:boolean}).sf?"3px solid #1D4ED8":"none"}}>
-                  <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:"6px"}}>{m.l}</div>
-                  <div style={{fontSize:"22px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:(m as {sf?:boolean}).sf?"#1D4ED8":D.ink,fontFamily:"'DM Serif Display',serif"}}>{m.v}</div>
-                  <div style={{fontSize:"10px",color:D.ink3,marginTop:"2px"}}>{m.u}</div>
+                <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean;sf?:boolean}).accent?D.accentBorder:(m as {sf?:boolean}).sf?"#BFDBFE":D.border}`,borderRadius:"12px",padding:"1.1rem 1.25rem",boxShadow:D.shadow,borderTop:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:(m as {sf?:boolean}).sf?"3px solid #3B82F6":"3px solid transparent"}}>
+                  <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"8px",fontWeight:500}}>{m.l}</div>
+                  <div style={{fontSize:"24px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:(m as {sf?:boolean}).sf?"#2563EB":D.ink,fontFamily:"'DM Serif Display',serif",letterSpacing:"-0.02em"}}>{m.v}</div>
+                  <div style={{fontSize:"11px",color:D.ink3,marginTop:"4px"}}>{m.u}</div>
                 </div>
               ))}
             </div>
             {metrics.mwpProb2027>0&&(
-              <div style={{display:"flex",alignItems:"center",gap:"12px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"10px",padding:"8px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"12px",background:D.white,border:`1px solid ${D.border}`,borderRadius:"10px",padding:"10px 16px",boxShadow:D.shadow}}>
                 <span style={{fontSize:"10px",fontWeight:600,color:"#7C3AED",textTransform:"uppercase",letterSpacing:"0.05em"}}>Probable cierre 2027</span>
-                <span style={{fontSize:"14px",fontWeight:700,color:D.ink}}>{metrics.mwpProb2027.toFixed(2)} MWp</span>
+                <span style={{fontSize:"15px",fontWeight:700,color:D.ink}}>{metrics.mwpProb2027.toFixed(2)} MWp</span>
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <ResumenSemanal clients={activeClients} transcripts={transcripts}/>
             <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts}/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
               <PipelineGeneradoChart clients={clients}/>
               <ConversionRate clients={clients}/>
             </div>
