@@ -513,6 +513,17 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
 }
 
 // --- Client Detail Modal (Reuniones + Llamados) -------------------------------
+function ExpandableNotes({notes}:{notes:string}){
+  const [expanded,setExpanded]=useState(false);
+  const isLong=notes.length>200;
+  return(
+    <div style={{fontSize:"12px",color:"#4A4A4A",lineHeight:1.6,marginBottom:"6px",cursor:isLong?"pointer":"default"}} onClick={()=>isLong&&setExpanded(e=>!e)}>
+      {expanded||!isLong?notes:notes.substring(0,200)+"…"}
+      {isLong&&<span style={{color:"#7C3AED",fontSize:"11px",marginLeft:"6px",fontWeight:500}}>{expanded?"Ver menos ▲":"Ver más ▼"}</span>}
+    </div>
+  );
+}
+
 function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client:ClientRecord;transcripts:TranscriptInfo[];onUpdateMeetings:(meetings:Meeting[])=>void;onClose:()=>void}){
   const today=todayISO();
   const [meetings,setMeetings]=useState<Meeting[]>(()=>{
@@ -738,7 +749,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
                 {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"12px",padding:"2px 6px"}}>×</button>}
               </div>
               {m.subject&&<div style={{fontSize:"12px",fontWeight:500,color:"#1A1A1A",marginBottom:"4px"}}>📌 {m.subject}</div>}
-              {m.notes&&<div style={{fontSize:"12px",color:"#4A4A4A",lineHeight:1.5,marginBottom:"6px",maxHeight:"80px",overflow:"hidden",display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical"}}>{m.notes}</div>}
+              {m.notes&&<ExpandableNotes notes={m.notes}/>}
               {summaries[m.id]&&<div style={{background:"#FFFFFF",borderRadius:"8px",padding:"8px 10px",fontSize:"11px",color:"#4A4A4A",borderLeft:"2px solid #E8500A",marginTop:"6px"}}><span style={{fontWeight:600,color:"#E8500A",marginRight:"4px"}}>Resumen IA:</span>{summaries[m.id]}</div>}
               {m.fromDiio&&m.notes&&!summaries[m.id]&&<button onClick={()=>summarize(m)} disabled={summarizing===m.id} style={{marginTop:"4px",padding:"3px 10px",borderRadius:"7px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"11px",cursor:"pointer",color:"#4A4A4A"}}>{summarizing===m.id?"Resumiendo...":"✦ Resumir con IA"}</button>}
             </div>
@@ -1276,7 +1287,7 @@ function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:strin
   const [expanded,setExpanded]=useState(false);
 
   const esTarea=act.tipo.startsWith("✓")||act.tipo.startsWith("📋")||act.pendiente;
-  const hasContent=!esTarea&&act.nota&&act.nota.trim().length>10;
+  const hasContent=!esTarea&&act.nota&&act.nota.trim().length>3;
 
   const icono=act.tipo.toLowerCase().includes("correo")?"✉":act.tipo.toLowerCase().includes("llamado")?"📞":act.tipo.toLowerCase().includes("reuni")?"📅":"📌";
   const tipoLabel=act.tipo.toLowerCase().includes("correo")?"Correo":act.tipo.toLowerCase().includes("llamado")?"Llamado":act.tipo.toLowerCase().includes("reuni")?"Reunión":act.tipo;
@@ -1895,7 +1906,7 @@ function ResumenSemanal({clients,transcripts}:{clients:ClientRecord[];transcript
       const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
       for(const t of diio.slice(0,2)){
         lines.push(`[REUNION DIIO ${t.date}]
-${t.transcript?.substring(0,600)||""}`);
+${t.transcript?.substring(0,800)||""}`);
       }
       if(lines.length===1)lines.push("Sin actividad reciente registrada");
       return lines.join("\n");
@@ -1969,7 +1980,7 @@ function buildCRMContext(clients:ClientRecord[],transcripts:TranscriptInfo[]):st
     const meetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date));
     for(const m of meetings.slice(0,5)){
       lines.push(`[${m.type.toUpperCase()} ${m.date}${m.subject?" | "+m.subject:""}]
-${m.notes?.substring(0,800)||""}`);
+${m.notes?.substring(0,1500)||""}`);
     }
     // Diio
     const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
