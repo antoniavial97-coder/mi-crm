@@ -1369,7 +1369,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
         const meetingMonth=m.date.substring(0,7); // YYYY-MM
         if(meetingMonth===mesSel){
           const tipo=m.pending?"🗓 Agendado":m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo";
-          acts.push({tipo,fecha:m.date,nota:m.subject||m.notes?.substring(0,120)||"",pendiente:!!m.pending});
+          acts.push({tipo,fecha:m.date,nota:m.notes||m.subject||"",pendiente:!!m.pending});
         }
       }
       // Diio del mes - normalizar fecha para comparar
