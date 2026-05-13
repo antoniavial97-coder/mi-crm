@@ -1997,18 +1997,14 @@ function ChatTab({clients,transcripts}:{clients:ClientRecord[];transcripts:Trans
     setLoading(true);
     try{
       const ctx=buildCRMContext(clients,transcripts);
-      const history=msgs.slice(-6).map(m=>({role:m.role,content:m.text}));
-      const res=await fetch("/api/generate-actions",{
+      const history=[...msgs.slice(-8),{role:"user" as const,text:q}]
+        .map(m=>({role:m.role==="user"?"user":"assistant",content:m.text}));
+      const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          company:"Chat CRM",
-          stage:"assistant",
-          comment:`Eres un asistente de ventas para Antonia Vial, Relationship Manager en Solarity (energía solar). Tenés acceso al historial completo de su CRM. Respondé de forma concisa y directa. Si te preguntan por un cliente específico, buscá su información en el contexto. Si no encontrás info, decilo.\n\nCONTEXTO CRM:\n${ctx}\n\nHISTORIAL DE CONVERSACIÓN:\n${history.map(m=>m.role+": "+m.content).join("\n")}\n\nPREGUNTA ACTUAL: ${q}`,
-          transcripts:[]
-        })
+        body:JSON.stringify({messages:history,context:ctx})
       });
-      const data=await res.json() as {tasks?:string[]};
-      const reply=(data.tasks||[]).join("\n")||"No pude procesar esa consulta.";
+      const data=await res.json() as {reply?:string;error?:string};
+      const reply=data.reply||data.error||"No pude procesar esa consulta.";
       setMsgs(prev=>[...prev,{role:"assistant",text:reply}]);
     }catch{
       setMsgs(prev=>[...prev,{role:"assistant",text:"Error al conectar. Intentá de nuevo."}]);
