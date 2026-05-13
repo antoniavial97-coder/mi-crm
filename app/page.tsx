@@ -1271,7 +1271,7 @@ function ProspectoRow({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeti
 
 // --- Tab Views ----------------------------------------------------------------
 // --- Semana Tab ---------------------------------------------------------------
-function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:string;pendiente:boolean};clientName:string}){
+function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:string;pendiente?:boolean};clientName:string}){
   const [expanded,setExpanded]=useState(false);
   const [resumen,setResumen]=useState("");
   const [loading,setLoading]=useState(false);
