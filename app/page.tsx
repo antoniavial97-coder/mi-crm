@@ -83,7 +83,7 @@ function closingDate(subStage:SubStage|undefined,stageDate?:string):Date|null{
 }
 function closingMonthKey(subStage:SubStage|undefined,stageDate?:string):string|null{const d=closingDate(subStage,stageDate);if(!d)return null;return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
 function monthLabel(key:string){const [y,m]=key.split("-");const names=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];return `${names[parseInt(m)-1]} ${y}`;}
-function formatDateShort(iso:string):string{if(!iso)return "";const d=new Date(iso);if(isNaN(d.getTime()))return iso;return `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;}
+function formatDateShort(iso:string):string{if(!iso)return "";const parts=iso.slice(0,10).split("-");if(parts.length!==3)return iso;return `${parts[2]}/${parts[1]}/${parts[0]}`;}
 function monthKey(iso:string):string{if(!iso)return "";const d=new Date(iso);if(isNaN(d.getTime()))return "";return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
 
 // --- CSV Parsers --------------------------------------------------------------
@@ -1271,6 +1271,59 @@ function ProspectoRow({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeti
 
 // --- Tab Views ----------------------------------------------------------------
 // --- Semana Tab ---------------------------------------------------------------
+function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:string;pendiente:boolean};clientName:string}){
+  const [expanded,setExpanded]=useState(false);
+  const [resumen,setResumen]=useState("");
+  const [loading,setLoading]=useState(false);
+  const hasContent=act.nota&&act.nota.length>60;
+
+  async function generarResumen(){
+    if(resumen)return;
+    setLoading(true);
+    try{
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:clientName,stage:"actividad",
+          comment:`Resume en 2-3 oraciones concretas lo más importante de esta actividad: ${act.nota?.substring(0,1000)||""}`,
+          transcripts:[]
+        })
+      });
+      const data=await res.json() as {tasks?:string[]};
+      setResumen((data.tasks||[])[0]||act.nota||"");
+    }catch{setResumen(act.nota||"");}
+    setLoading(false);
+  }
+
+  function handleClick(){
+    if(!hasContent)return;
+    if(!expanded&&!resumen)generarResumen();
+    setExpanded(e=>!e);
+  }
+
+  return(
+    <div style={{borderRadius:"8px",border:act.pendiente?"1px solid #FDE68A":"1px solid transparent",background:act.pendiente?"#FFFBEB":D.bg,overflow:"hidden"}}>
+      <div onClick={handleClick} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"6px 10px",alignItems:"flex-start",cursor:hasContent?"pointer":"default"}}>
+        <span style={{flexShrink:0,fontWeight:600,color:act.pendiente?"#d97706":act.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"110px"}}>{act.tipo}</span>
+        <span style={{color:D.ink3,flexShrink:0,minWidth:"75px"}}>{formatDateShort(act.fecha)}</span>
+        {act.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.5,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:expanded?undefined:2,WebkitBoxOrient:"vertical"}}>{act.nota}</span>}
+        {hasContent&&<span style={{color:D.ink3,fontSize:"10px",flexShrink:0}}>{expanded?"▲":"▼"}</span>}
+      </div>
+      {expanded&&(
+        <div style={{padding:"8px 10px 10px",borderTop:`1px solid ${D.border}`}}>
+          {loading?(
+            <div style={{fontSize:"11px",color:"#7C3AED"}}>✦ Resumiendo...</div>
+          ):(
+            <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.6,background:D.white,borderRadius:"6px",padding:"8px 10px",borderLeft:"2px solid #7C3AED"}}>
+              {resumen}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onUpdateTasks:(id:string,tasks:ClientTask[])=>void}){
   const hoy=new Date();
   const mesActual=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`;
@@ -1427,11 +1480,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
                     <div style={{fontSize:"11px",color:D.ink3,fontStyle:"italic",padding:"4px 8px"}}>Sin actividad registrada este mes</div>
                   )}
                   {acts.map((a,i)=>(
-                    <div key={i} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"6px 10px",background:a.pendiente?"#FFFBEB":D.bg,borderRadius:"8px",border:a.pendiente?"1px solid #FDE68A":"none",alignItems:"flex-start"}}>
-                      <span style={{flexShrink:0,fontWeight:600,color:a.pendiente?"#d97706":a.tipo.startsWith("✓")?"#16a34a":D.accent,minWidth:"110px"}}>{a.tipo}</span>
-                      <span style={{color:D.ink3,flexShrink:0,minWidth:"75px"}}>{formatDateShort(a.fecha)}</span>
-                      {a.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.5}}>{a.nota}</span>}
-                    </div>
+                    <ActividadRow key={i} act={a} clientName={client.companyName}/>
                   ))}
                 </div>
               </div>
