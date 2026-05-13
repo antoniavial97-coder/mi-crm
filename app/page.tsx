@@ -1095,15 +1095,21 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
         </div>
       </div>
       {client.subStage&&(
-        <div style={{marginBottom:"6px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
-          <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
-          {client.salesforce&&<span style={{fontSize:"9px",fontWeight:600,color:"#1D4ED8",background:"#EFF6FF",padding:"1px 6px",borderRadius:"10px",border:"1px solid #BFDBFE"}}>SF ✓</span>}
-          {daysInStage!==null&&<span style={{fontSize:"9px",color:daysInStage>30?"#dc2626":D.ink3}}>⏱ {daysInStage}d</span>}
-          {isPresentacion&&client.stageDate&&(
-            <span style={{fontSize:"10px",color:D.ink3}}>
-              Pres. {formatDateShort(client.stageDate)}{closingD&&<> · Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</>}
-            </span>
+        <div style={{marginBottom:"8px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap",marginBottom:"5px"}}>
+            <span style={{fontSize:"10px",fontWeight:600,color:D.accent,borderLeft:`2px solid ${D.accent}`,paddingLeft:"5px"}}>{client.subStage}</span>
+            {client.salesforce&&<span style={{fontSize:"9px",fontWeight:600,color:"#1D4ED8",background:"#EFF6FF",padding:"1px 6px",borderRadius:"10px",border:"1px solid #BFDBFE"}}>SF ✓</span>}
+            {daysInStage!==null&&<span style={{fontSize:"9px",color:daysInStage>30?"#dc2626":D.ink3}}>⏱ {daysInStage}d</span>}
+            {closingD&&<span style={{fontSize:"9px",color:D.ink3}}>Cierre est. {formatDateShort(closingD.toISOString().slice(0,10))}</span>}
+          </div>
+          {/* Barra de progreso por subetapa */}
+          {!isSigned&&(
+            <div style={{height:"4px",background:D.border,borderRadius:"2px",overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${client.closeProbabilityPct}%`,background:client.closeProbabilityPct>=50?"linear-gradient(90deg,#16a34a,#22c55e)":client.closeProbabilityPct>=25?"linear-gradient(90deg,#E8500A,#f97316)":"linear-gradient(90deg,#E8500A,#fbbf24)",borderRadius:"2px",transition:"width 0.3s"}}/>
+            </div>
           )}
+          {/* Próximo paso si existe */}
+          {client.nextStep&&<div style={{fontSize:"10px",color:"#7C3AED",marginTop:"4px",fontStyle:"italic"}}>🎯 {client.nextStep}</div>}
         </div>
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"8px"}}>
@@ -1405,6 +1411,77 @@ function FiltrosPipeline({subStages,onFilter}:{subStages:SubStage[];onFilter:(f:
 }
 
 // --- Tasa de Conversión -------------------------------------------------------
+function ProyeccionMWpChart({clients}:{clients:ClientRecord[]}){
+  const data=useMemo(()=>{
+    const hoy=new Date();
+    const meses:Array<{label:string;mes:string;firmado:number;probable:number;posible:number}>=[];
+    // 6 meses: 2 pasados + actual + 3 futuros
+    for(let i=-2;i<=3;i++){
+      const d=new Date(hoy.getFullYear(),hoy.getMonth()+i,1);
+      const mes=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      const label=monthLabel(mes);
+      let firmado=0,probable=0,posible=0;
+      for(const c of clients){
+        if(c.stage==="Perdido")continue;
+        // Firmados: contratos ya firmados con fecha de etapa en ese mes
+        if(c.subStage==="Contrato firmado"&&c.stageDate&&c.stageDate.startsWith(mes)){
+          firmado+=c.mwp;
+        }
+        // Fecha estimada de cierre por subetapa
+        const estDate=c.subStage?closingDate(c.subStage,c.stageDate||todayISO()):null;
+        if(estDate){
+          const estMes=`${estDate.getFullYear()}-${String(estDate.getMonth()+1).padStart(2,"0")}`;
+          if(estMes===mes&&c.subStage!=="Contrato firmado"){
+            if(c.closeProbabilityPct>=25)probable+=c.mwp*(c.closeProbabilityPct/100);
+            else posible+=c.mwp*(c.closeProbabilityPct/100);
+          }
+        }
+      }
+      meses.push({label,mes,firmado:Math.round(firmado*100)/100,probable:Math.round(probable*100)/100,posible:Math.round(posible*100)/100});
+    }
+    return meses;
+  },[clients]);
+
+  const maxVal=Math.max(...data.map(d=>d.firmado+d.probable+d.posible),0.5);
+  const mesActual=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,"0")}`;
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.25rem"}}>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Proyección de cierre MWp</div>
+      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Estimado por fecha de cierre esperada por etapa</div>
+      <div style={{display:"flex",gap:"6px",alignItems:"flex-end",height:"120px"}}>
+        {data.map((d,i)=>{
+          const total=d.firmado+d.probable+d.posible;
+          const isActual=d.mes===mesActual;
+          const firPct=total>0?(d.firmado/maxVal)*100:0;
+          const probPct=total>0?(d.probable/maxVal)*100:0;
+          const posPct=total>0?(d.posible/maxVal)*100:0;
+          return(
+            <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:"4px"}}>
+              {total>0&&<div style={{fontSize:"9px",color:D.ink3,fontWeight:500}}>{total.toFixed(1)}</div>}
+              <div style={{width:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",height:"90px",gap:"1px"}}>
+                {d.posible>0&&<div style={{width:"100%",height:`${posPct}%`,background:"#FEF3C7",borderRadius:"3px 3px 0 0",minHeight:"3px"}}/>}
+                {d.probable>0&&<div style={{width:"100%",height:`${probPct}%`,background:`${D.accent}88`,minHeight:"3px"}}/>}
+                {d.firmado>0&&<div style={{width:"100%",height:`${firPct}%`,background:"#16a34a",borderRadius:d.probable===0&&d.posible===0?"3px 3px 0 0":"0",minHeight:"3px"}}/>}
+                {total===0&&<div style={{width:"100%",height:"4px",background:D.border,borderRadius:"2px"}}/>}
+              </div>
+              <div style={{fontSize:"9px",color:isActual?D.accent:D.ink3,fontWeight:isActual?700:400,textAlign:"center"}}>{d.label}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{display:"flex",gap:"12px",marginTop:"8px",flexWrap:"wrap"}}>
+        {[{c:"#16a34a",l:"Firmado"},{c:`${D.accent}88`,l:"Probable (≥25%)"},{c:"#FEF3C7",l:"Posible (<25%)",border:"1px solid #FDE68A"}].map((l,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:"4px",fontSize:"10px",color:D.ink3}}>
+            <div style={{width:"10px",height:"10px",borderRadius:"2px",background:l.c,border:(l as {border?:string}).border}}/>
+            {l.l}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ConversionRate({clients}:{clients:ClientRecord[]}){
   const stats=useMemo(()=>{
     const prospectos=clients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo").length;
@@ -1870,6 +1947,7 @@ export default function Home(){
               <PipelineGeneradoChart clients={clients}/>
               <ConversionRate clients={clients}/>
             </div>
+            <ProyeccionMWpChart clients={activeClients}/>
           </div>
         )}
         {activeTab==="semana"&&<SemanaTab clients={activeClients} transcripts={transcripts} onUpdateTasks={updateClientTasks}/>}
