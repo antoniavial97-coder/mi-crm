@@ -1272,64 +1272,52 @@ function ProspectoRow({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeti
 // --- Tab Views ----------------------------------------------------------------
 // --- Semana Tab ---------------------------------------------------------------
 function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:string;pendiente?:boolean};clientName:string}){
-  const [expanded,setExpanded]=useState(false);
   const [resumen,setResumen]=useState("");
-  const [loading,setLoading]=useState(false);
+  const [expanded,setExpanded]=useState(false);
 
-  // Solo mostrar resumen para actividades reales con contenido, no tareas ni pendientes
   const esTarea=act.tipo.startsWith("✓")||act.tipo.startsWith("📋")||act.pendiente;
-  const hasContent=!esTarea&&act.nota&&act.nota.trim().length>20;
+  const hasContent=!esTarea&&act.nota&&act.nota.trim().length>10;
 
-  // Ícono según tipo
   const icono=act.tipo.toLowerCase().includes("correo")?"✉":act.tipo.toLowerCase().includes("llamado")?"📞":act.tipo.toLowerCase().includes("reuni")?"📅":"📌";
   const tipoLabel=act.tipo.toLowerCase().includes("correo")?"Correo":act.tipo.toLowerCase().includes("llamado")?"Llamado":act.tipo.toLowerCase().includes("reuni")?"Reunión":act.tipo;
+  const contenido=(act.nota||"").replace(/^De:.*?- Para:.*?\n/,"").trim();
 
-  async function generarResumen(){
-    if(resumen||loading)return;
-    setLoading(true);
-    try{
-      const res=await fetch("/api/generate-actions",{
-        method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          company:clientName,stage:"actividad",
-          comment:`Resume en máximo 2 oraciones concretas lo más importante de esta ${tipoLabel.toLowerCase()}. Sin mencionar el asunto ni el nombre del cliente. Solo los puntos clave y acuerdos: ${act.nota?.substring(0,1000)||""}`,
-          transcripts:[]
-        })
-      });
-      const data=await res.json() as {tasks?:string[]};
-      setResumen((data.tasks||[])[0]||"");
-    }catch{}
-    setLoading(false);
-  }
-
-  function handleClick(){
-    if(!hasContent)return;
-    if(!expanded)generarResumen();
-    setExpanded(e=>!e);
-  }
+  useEffect(()=>{
+    if(!hasContent||!act.nota)return;
+    let cancelled=false;
+    fetch("/api/generate-actions",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        company:clientName,stage:"actividad",
+        comment:`En UNA sola línea corta (máximo 12 palabras), resume la acción principal de este ${tipoLabel.toLowerCase()}: quién hace qué. Ejemplos: "Antonia solicita reunión técnica", "Carlos confirma disponibilidad para el jueves", "Alfonso envía propuesta actualizada con precios". Solo la línea, sin puntos ni explicaciones. Contenido: ${act.nota?.substring(0,600)||""}`,
+        transcripts:[]
+      })
+    }).then(r=>r.json()).then((data:{tasks?:string[]})=>{
+      if(!cancelled)setResumen((data.tasks||[])[0]||"");
+    }).catch(()=>{});
+    return()=>{cancelled=true;};
+  },[act.nota]);// eslint-disable-line
 
   return(
-    <div style={{borderRadius:"8px",overflow:"hidden",background:act.pendiente?"#FFFBEB":D.bg,border:act.pendiente?"1px solid #FDE68A":"1px solid transparent"}}>
-      <div onClick={handleClick} style={{display:"flex",gap:"10px",fontSize:"11px",padding:"7px 10px",alignItems:"center",cursor:hasContent?"pointer":"default"}}>
-        <span style={{fontWeight:600,color:act.pendiente?"#d97706":act.tipo.startsWith("✓")?"#16a34a":D.accent,flexShrink:0}}>
+    <div style={{borderRadius:"8px",overflow:"hidden",background:act.pendiente?"#FFFBEB":D.bg,border:act.pendiente?"1px solid #FDE68A":"none"}}>
+      <div onClick={()=>hasContent&&setExpanded(e=>!e)} style={{display:"flex",gap:"8px",fontSize:"11px",padding:"6px 10px",alignItems:"center",cursor:hasContent?"pointer":"default"}}>
+        <span style={{fontWeight:600,color:act.pendiente?"#d97706":act.tipo.startsWith("✓")?"#16a34a":D.accent,flexShrink:0,minWidth:"65px"}}>
           {hasContent?icono+" "+tipoLabel:act.tipo}
         </span>
         <span style={{color:D.ink3,flexShrink:0}}>{formatDateShort(act.fecha)}</span>
-        {!hasContent&&act.nota&&<span style={{color:D.ink2,flex:1,lineHeight:1.4}}>{act.nota}</span>}
-        {hasContent&&!expanded&&<span style={{color:D.ink3,fontSize:"10px",flex:1,textAlign:"right"}}>Ver resumen ▼</span>}
-        {hasContent&&expanded&&<span style={{color:D.ink3,fontSize:"10px",flex:1,textAlign:"right"}}>Cerrar ▲</span>}
+        {hasContent&&(
+          <span style={{color:resumen?D.ink2:D.ink3,flex:1,fontStyle:resumen?"normal":"italic"}}>
+            {resumen||"…"}
+          </span>
+        )}
+        {!hasContent&&act.nota&&<span style={{color:D.ink2,flex:1}}>{act.nota}</span>}
+        {hasContent&&<span style={{color:D.ink3,fontSize:"10px",flexShrink:0}}>{expanded?"▲":"▼"}</span>}
       </div>
-      {expanded&&(
-        <div style={{padding:"8px 10px 10px",borderTop:`1px solid ${D.border}`}}>
-          {loading?(
-            <div style={{fontSize:"11px",color:"#7C3AED",fontStyle:"italic"}}>✦ Generando resumen...</div>
-          ):resumen?(
-            <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.6,background:D.white,borderRadius:"6px",padding:"8px 10px",borderLeft:"3px solid #7C3AED"}}>
-              {resumen}
-            </div>
-          ):(
-            <div style={{fontSize:"11px",color:D.ink3,fontStyle:"italic"}}>Sin contenido para resumir.</div>
-          )}
+      {expanded&&hasContent&&(
+        <div style={{padding:"6px 10px 10px",borderTop:`1px solid ${D.border}`}}>
+          <div style={{fontSize:"12px",color:D.ink2,lineHeight:1.65,background:D.white,borderRadius:"6px",padding:"8px 12px",borderLeft:`3px solid ${D.accent}`,whiteSpace:"pre-wrap"}}>
+            {contenido}
+          </div>
         </div>
       )}
     </div>
