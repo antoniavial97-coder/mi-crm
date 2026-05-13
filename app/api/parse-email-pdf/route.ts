@@ -31,26 +31,29 @@ export async function POST(req: NextRequest) {
             },
             {
               type: "text",
-              text: `Analiza este PDF que contiene una cadena de correos electrónicos.
+              text: `Analiza este PDF que contiene una cadena de correos electrónicos de Outlook.
 
-INSTRUCCIONES ESTRICTAS:
-1. Identifica CADA correo individual en la cadena. Un correo nuevo empieza cuando hay un nuevo "De:", "From:", "Fecha:", "Date:", "Enviado:" o similar.
-2. NO omitas ningún correo — si hay 4 correos, devuelve 4 objetos.
-3. SOLO incluye correos con fecha igual o posterior al 09 de marzo de 2026 (2026-03-09). Descarta cualquier correo anterior a esa fecha.
-4. Para la fecha, conviértela siempre a formato YYYY-MM-DD.
+IMPORTANTE: En Outlook, el correo MÁS RECIENTE aparece al INICIO/ARRIBA del PDF, y los más antiguos están al final/abajo. Debes leer TODOS los correos en todo el documento, incluyendo el primero que aparece al inicio.
 
-Devuelve ÚNICAMENTE un JSON array (sin markdown, sin explicaciones) con este formato exacto:
+INSTRUCCIONES:
+1. Lee el documento COMPLETO de principio a fin (página 1 hasta la última).
+2. Identifica CADA correo individual. Un nuevo correo comienza cuando aparece un bloque con "De:/From:", "Fecha:/Sent:/Enviado:", "Para:/To:".
+3. NO omitas ningún correo — extrae absolutamente todos los que encuentres.
+4. SOLO incluye correos con fecha igual o posterior al 09 de marzo de 2026 (2026-03-09). Descarta los anteriores.
+5. Convierte todas las fechas a formato YYYY-MM-DD.
+
+Devuelve ÚNICAMENTE un JSON array (sin markdown, sin explicaciones) ordenado por fecha ascendente:
 [
   {
     "fecha": "YYYY-MM-DD",
-    "de": "nombre o email del remitente",
-    "para": "nombre o email del destinatario",
+    "de": "nombre completo o email del remitente",
+    "para": "nombre completo o email del destinatario principal",
     "asunto": "asunto del correo",
-    "cuerpo": "resumen de 1-2 oraciones del contenido del correo"
+    "cuerpo": "resumen de 1-2 oraciones del contenido principal del correo"
   }
 ]
 
-Si no hay correos desde el 09/03/2026, devuelve un array vacío: []`
+Si no hay correos desde el 09/03/2026, devuelve: []`
             }
           ]
         }]
@@ -67,7 +70,7 @@ Si no hay correos desde el 09/03/2026, devuelve un array vacío: []`
     try {
       const clean = text.replace(/```json|```/g, "").trim();
       emails = JSON.parse(clean);
-      // Filter by date as backup — remove anything before 2026-03-09
+      // Filter by date as backup
       emails = (emails as Array<{fecha:string}>).filter(e => e.fecha >= "2026-03-09");
     } catch {
       return NextResponse.json({ error: `Parse error: ${text.substring(0, 300)}` }, { status: 500 });
