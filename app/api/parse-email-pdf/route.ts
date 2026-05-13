@@ -31,25 +31,28 @@ export async function POST(req: NextRequest) {
             },
             {
               type: "text",
-              text: `Analiza este PDF que contiene una cadena de correos electrónicos de Outlook.
+              text: `Analiza este PDF que contiene una cadena de correos electrónicos exportada desde Outlook.
 
-CONTEXTO: En Outlook exportado a PDF, el correo más reciente aparece al INICIO y los más antiguos al final. Además, cada correo suele incluir el historial citado de correos anteriores — esos correos citados NO deben extraerse de nuevo, ya que serán extraídos cuando aparezcan como correos independientes.
+CONTEXTO CRÍTICO:
+- El correo MÁS RECIENTE aparece al INICIO del PDF (página 1, arriba del todo). Este suele tener un formato diferente: "Desde", "Fecha", "Para", "CC" cada uno en una línea separada con el valor al lado. Es el correo principal del hilo y DEBES incluirlo.
+- Los correos más antiguos aparecen después, con formato "De:", "Enviado:", "Para:", etc.
+- Los correos citados DENTRO de otro correo no se extraen por separado.
 
-REGLAS ESTRICTAS:
-1. Extrae SOLO los correos que aparecen como mensajes NUEVOS/INDEPENDIENTES (con su propio encabezado completo De/Fecha/Para). NO extraigas los correos que aparecen citados/incluidos dentro de otro correo.
-2. Si dos correos tienen exactamente la misma fecha y remitente, es el mismo correo — incluye solo uno.
-3. SOLO incluye correos con fecha igual o posterior al 09 de marzo de 2026 (2026-03-09).
-4. Convierte todas las fechas a YYYY-MM-DD.
-5. Ordena el resultado por fecha ascendente (más antiguo primero).
+REGLAS:
+1. El primer correo del PDF (el más reciente, al inicio) SIEMPRE debe incluirse si su fecha es >= 2026-03-09.
+2. Extrae cada correo independiente una sola vez. No dupliques.
+3. Solo correos desde el 09/03/2026 en adelante.
+4. Ordena por fecha ascendente (más antiguo primero).
+5. Convierte fechas a YYYY-MM-DD.
 
-Devuelve ÚNICAMENTE un JSON array sin markdown:
+Devuelve SOLO un JSON array sin markdown:
 [
   {
     "fecha": "YYYY-MM-DD",
-    "de": "nombre completo o email del remitente",
-    "para": "nombre completo o email del destinatario principal",
-    "asunto": "asunto del correo",
-    "cuerpo": "resumen de 1-2 oraciones del contenido principal"
+    "de": "nombre o email del remitente",
+    "para": "nombre o email del destinatario principal",
+    "asunto": "asunto",
+    "cuerpo": "resumen de 1-2 oraciones del contenido"
   }
 ]`
             }
@@ -68,7 +71,6 @@ Devuelve ÚNICAMENTE un JSON array sin markdown:
     try {
       const clean = text.replace(/```json|```/g, "").trim();
       emails = JSON.parse(clean);
-      // Filter by date + deduplicate by fecha+de
       const seen = new Set<string>();
       emails = emails.filter(e => {
         if(e.fecha < "2026-03-09") return false;
