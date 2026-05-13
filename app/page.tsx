@@ -1927,8 +1927,13 @@ export default function Home(){
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
-          // Siempre preservar meetings locales si existen — nunca los pierdas
-          const localMeetings=e?.meetings||[];
+          // Buscar meetings en backup por nombre empresa (más robusto)
+          const backupKey=`solar-crm:meetings:${c.companyName.toLowerCase().replace(/\s+/g,"-")}`;
+          let localMeetings=e?.meetings||[];
+          try{
+            const backup=localStorage.getItem(backupKey);
+            if(backup){const bm=JSON.parse(backup) as Meeting[];if(bm.length>localMeetings.length)localMeetings=bm;}
+          }catch{}
           return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:localMeetings,lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep,aiStatus:e.aiStatus,aiStatusDate:e.aiStatusDate}:c;
         });
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
@@ -1936,28 +1941,24 @@ export default function Home(){
     }catch{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("error");}
   },[]);
 
-  useEffect(()=>{
-    // Solo cargar desde localStorage al inicio, NO hacer sync automático
-    const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
-    if(local.length>0){
-      setClients(local);
-      setSheetStatus("ok");
-    } else {
-      // Primera vez — cargar del Sheet
-      loadFromSheet();
-    }
-  },[]);
+  useEffect(()=>{loadFromSheet();},[loadFromSheet]);
   useEffect(()=>{if(clients.length>0){localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));}},[clients]);
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){
     setClients(prev=>{
       const updated=prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c);
-      // Guardar inmediatamente en localStorage sin esperar el useEffect
-      try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(updated));}catch{}
+      try{
+        localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(updated));
+        // Backup meetings por empresa para sobrevivir syncs
+        const client=prev.find(c=>c.id===clientId);
+        if(client){
+          const backupKey=`solar-crm:meetings:${client.companyName.toLowerCase().replace(/\s+/g,"-")}`;
+          localStorage.setItem(backupKey,JSON.stringify(meetings.filter(m=>!m.fromDiio)));
+        }
+      }catch{}
       return updated;
     });
-    // Marcar como contacto reciente usando nombre empresa
     const client=clients.find(c=>c.id===clientId);
     if(client){
       const key=client.companyName.toLowerCase();
