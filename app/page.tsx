@@ -1829,12 +1829,29 @@ function ResumenSemanal({clients,transcripts}:{clients:ClientRecord[];transcript
       if(!ultima)return true;
       return Math.floor((new Date().getTime()-ultima.getTime())/(1000*60*60*24))>=14;
     });
-    const context=`
-Pipeline P1 (${p1.length} clientes): ${p1.map(c=>`${c.companyName} (${c.subStage||"sin etapa"}, ${c.mwp}MWp, comentario: ${c.nextAction||"ninguno"})`).join("; ")}
-Sin contacto +14 días: ${sinContacto.map(c=>c.companyName).join(", ")||"ninguno"}
-Pipeline P2 y Prospectos activos: ${activos.map(c=>c.companyName).join(", ")||"ninguno"}
-Reuniones recientes Diio: ${transcripts.slice(0,5).map(t=>`${t.company} (${t.date})`).join(", ")||"ninguna"}
-    `.trim();
+    // Construir contexto detallado con historial real de cada cliente
+    const hoy2=new Date();
+    const hace30=new Date(hoy2);hace30.setDate(hace30.getDate()-30);
+    const hace30ISO=hace30.toISOString().slice(0,10);
+
+    const clienteDetalle=([...p1,...activos]).map(c=>{
+      const lines:string[]=[`\n== ${c.companyName} (${c.stage}${c.subStage?" - "+c.subStage:""}, ${c.mwp}MWp) ==`];
+      if(c.nextStep)lines.push(`Próximo paso: ${c.nextStep}`);
+      // Meetings manuales recientes
+      const recentMeetings=(c.meetings||[]).filter(m=>!m.fromDiio&&m.date>=hace30ISO).sort((a,b)=>b.date.localeCompare(a.date));
+      for(const m of recentMeetings.slice(0,3)){
+        lines.push(`[${m.type.toUpperCase()} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,200)||""}`);
+      }
+      // Diio
+      const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
+      for(const t of diio.slice(0,2)){
+        lines.push(`[REUNION DIIO ${t.date}] ${t.transcript?.substring(0,300)||""}`);
+      }
+      if(lines.length===1)lines.push("Sin actividad reciente registrada");
+      return lines.join("\n");
+    }).join("\n");
+
+    const context=`Hoy es ${hoy}. Pipeline activo de Antonia Vial, Relationship Manager en Solarity (energía solar C&I):\n${clienteDetalle}\n\nSin contacto +14 días: ${sinContacto.map(c=>c.companyName).join(", ")||"ninguno"}`;
     try{
       const res=await fetch("/api/generate-actions",{
         method:"POST",
