@@ -552,25 +552,53 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     if(!file)return;
     setParsingPDF(true);setPdfError("");
     try{
-      // Read PDF as text using FileReader + send as base64 but check size first
       const fileSizeMB=file.size/(1024*1024);
-      if(fileSizeMB>3){
-        setPdfError(`PDF demasiado grande (${fileSizeMB.toFixed(1)}MB). Máximo 3MB. Intentá exportar solo la cadena relevante.`);
+      if(fileSizeMB>10){
+        setPdfError(`PDF demasiado grande (${fileSizeMB.toFixed(1)}MB). Máximo 10MB.`);
         setParsingPDF(false);
         if(fileInputRef.current)fileInputRef.current.value="";
         return;
       }
-      const base64=await new Promise<string>((res,rej)=>{
-        const r=new FileReader();
-        r.onload=()=>res((r.result as string).split(",")[1]);
-        r.onerror=rej;
-        r.readAsDataURL(file);
-      });
-      // Send to backend API route (CORS safe)
+
+      // Extract text from PDF using pdf.js
+      const arrayBuffer=await file.arrayBuffer();
+      let pdfText="";
+      try{
+        // Load pdf.js dynamically
+        if(!(window as unknown as Record<string,unknown>).pdfjsLib){
+          await new Promise<void>((res,rej)=>{
+            const s=document.createElement("script");
+            s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+            s.onload=()=>res();s.onerror=()=>rej();
+            document.head.appendChild(s);
+          });
+          // Set worker
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pdfjsLib=(window as any).pdfjsLib;
+        const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+        const pages=[];
+        for(let i=1;i<=pdf.numPages;i++){
+          const page=await pdf.getPage(i);
+          const content=await page.getTextContent();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          pages.push(content.items.map((item:any)=>item.str).join(" "));
+        }
+        pdfText=pages.join("\n\n--- NUEVA PÁGINA ---\n\n");
+      }catch{
+        setPdfError("Error al leer el PDF. Asegurate que no esté protegido.");
+        setParsingPDF(false);
+        if(fileInputRef.current)fileInputRef.current.value="";
+        return;
+      }
+
+      // Send extracted text to backend
       const response=await fetch("/api/parse-email-pdf",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({pdfBase64:base64})
+        body:JSON.stringify({pdfText})
       });
       const data=await response.json() as {emails?:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>;error?:string};
       if(!response.ok||data.error){setPdfError(data.error||"Error al procesar el PDF.");setParsingPDF(false);return;}
