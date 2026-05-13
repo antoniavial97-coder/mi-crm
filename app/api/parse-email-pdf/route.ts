@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as { pdfBase64?: string };
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "API key not configured" }, { status: 500 });
-
     if (!body.pdfBase64) return NextResponse.json({ error: "No PDF provided" }, { status: 400 });
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -19,7 +18,7 @@ export async function POST(req: NextRequest) {
         "anthropic-beta": "pdfs-2024-09-25",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-5",
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 4000,
         messages: [{
           role: "user",
@@ -30,23 +29,19 @@ export async function POST(req: NextRequest) {
             },
             {
               type: "text",
-              text: `Analiza este PDF que contiene una cadena de correos electrónicos exportada desde Outlook.
+              text: `Analiza este PDF de cadena de correos de Outlook.
 
-CONTEXTO CRÍTICO:
-- El correo MÁS RECIENTE aparece al INICIO del PDF (página 1, arriba del todo). Este suele tener formato: "Desde", "Fecha", "Para", "CC" cada uno en línea separada. Es el correo principal y DEBES incluirlo.
-- Los correos más antiguos aparecen después con formato "De:", "Enviado:", "Para:", etc.
-- Los correos citados DENTRO de otro correo NO se extraen por separado.
+CONTEXTO: El correo MAS RECIENTE aparece al INICIO del PDF. Los correos citados dentro de otro NO se extraen por separado.
 
-REGLAS ESTRICTAS:
-1. Lee TODO el documento completo de principio a fin.
-2. El primer correo del PDF (el más reciente) SIEMPRE debe incluirse si su fecha es >= 2026-03-09.
-3. Extrae cada correo independiente una sola vez. No dupliques.
-4. Solo correos desde el 09/03/2026 en adelante. Descarta los anteriores.
-5. Ordena por fecha ascendente (más antiguo primero).
-6. Convierte todas las fechas a YYYY-MM-DD.
+REGLAS:
+1. Lee todo el documento. Incluye siempre el primer correo (el mas reciente, al inicio).
+2. Extrae cada correo independiente una sola vez.
+3. Solo correos desde 09/03/2026 en adelante. Descarta los anteriores.
+4. Ordena por fecha ascendente (mas antiguo primero).
+5. Fechas en formato YYYY-MM-DD.
 
-Devuelve SOLO un JSON array sin markdown ni explicaciones:
-[{"fecha":"YYYY-MM-DD","de":"nombre o email del remitente","para":"nombre o email del destinatario principal","asunto":"asunto del correo","cuerpo":"resumen de 1-2 oraciones del contenido principal"}]`
+Devuelve SOLO JSON sin markdown:
+[{"fecha":"YYYY-MM-DD","de":"remitente","para":"destinatario","asunto":"asunto","cuerpo":"resumen 1-2 oraciones"}]`
             }
           ]
         }]
@@ -57,12 +52,11 @@ Devuelve SOLO un JSON array sin markdown ni explicaciones:
     if (!response.ok) return NextResponse.json({ error: data.error?.message || JSON.stringify(data) }, { status: 500 });
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text || "").join("");
-    if (!text) return NextResponse.json({ error: "Respuesta vacía" }, { status: 500 });
+    if (!text) return NextResponse.json({ error: "Respuesta vacia" }, { status: 500 });
 
     let emails: Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}> = [];
     try {
-      const clean = text.replace(/```json|```/g, "").trim();
-      emails = JSON.parse(clean);
+      emails = JSON.parse(text.replace(/```json|```/g, "").trim());
       const seen = new Set<string>();
       emails = emails.filter(e => {
         if(e.fecha < "2026-03-09") return false;
@@ -72,7 +66,7 @@ Devuelve SOLO un JSON array sin markdown ni explicaciones:
         return true;
       });
     } catch {
-      return NextResponse.json({ error: `Parse error: ${text.substring(0, 300)}` }, { status: 500 });
+      return NextResponse.json({ error: `Parse error: ${text.substring(0, 200)}` }, { status: 500 });
     }
 
     return NextResponse.json({ emails });
