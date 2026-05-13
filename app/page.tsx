@@ -1918,10 +1918,12 @@ export default function Home(){
       if(res3.ok){const csv3=await res3.text();setTranscripts(parseTranscriptsCSV(csv3));}
       if(parsed.length>0){
         const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
-        const localMap=new Map(local.map(c=>[c.companyName.toLowerCase(),c]));
+        // Build map with normalized key (remove accents, spaces, lowercase)
+        const normalize=(s:string)=>s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
+        const localMap=new Map(local.map(c=>[normalize(c.companyName),c]));
         const recentC=getRecentContacts();
         const merged=parsed.map(c=>{
-          const e=localMap.get(c.companyName.toLowerCase());
+          const e=localMap.get(normalize(c.companyName));
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
