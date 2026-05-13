@@ -1185,7 +1185,7 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
           </div>
         </div>
         <div style={{display:"flex",gap:"4px",flexShrink:0,alignItems:"flex-start"}}>
-          {meetingCount>0&&<button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver reuniones">📅{meetingCount}</button>}
+          <button onClick={()=>setShowDetail(true)} style={{padding:"4px 7px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"10px",cursor:"pointer",color:D.ink3}} title="Ver historial">📅{meetingCount>0?meetingCount:""}</button>
           <button onClick={()=>onEdit(client.id)} style={{padding:"4px 9px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2}}>Editar</button>
           <button onClick={()=>onDelete(client.id)} style={{padding:"4px 7px",borderRadius:"7px",border:"1px solid #fecaca",background:"#fff5f5",fontSize:"11px",cursor:"pointer",color:"#dc2626"}}>×</button>
         </div>
