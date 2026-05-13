@@ -565,30 +565,31 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
       let pdfText="";
       try{
         // Load pdf.js dynamically
-        if(!(window as unknown as Record<string,unknown>).pdfjsLib){
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if(!(window as any).pdfjsLib){
           await new Promise<void>((res,rej)=>{
             const s=document.createElement("script");
             s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
             s.onload=()=>res();s.onerror=()=>rej();
             document.head.appendChild(s);
           });
-          // Set worker
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pdfjsLib=(window as any).pdfjsLib;
-        const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
-        const pages=[];
+        // Disable worker to avoid CORS issues
+        pdfjsLib.GlobalWorkerOptions.workerSrc="";
+        const pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuffer),useWorkerFetch:false,isEvalSupported:false,useSystemFonts:true}).promise;
+        const pages:string[]=[];
         for(let i=1;i<=pdf.numPages;i++){
           const page=await pdf.getPage(i);
           const content=await page.getTextContent();
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          pages.push(content.items.map((item:any)=>item.str).join(" "));
+          pages.push(content.items.map((item:any)=>item.str||"").join(" "));
         }
-        pdfText=pages.join("\n\n--- NUEVA PÁGINA ---\n\n");
-      }catch{
-        setPdfError("Error al leer el PDF. Asegurate que no esté protegido.");
+        pdfText=pages.join("\n\n--- PÁGINA ---\n\n");
+        if(!pdfText.trim()){throw new Error("PDF sin texto extraíble");}
+      }catch(err){
+        setPdfError(`Error al leer el PDF: ${String(err).substring(0,100)}`);
         setParsingPDF(false);
         if(fileInputRef.current)fileInputRef.current.value="";
         return;
