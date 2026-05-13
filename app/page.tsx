@@ -581,7 +581,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
         const key=`${em.fecha}|${em.de}`;
         if(!seen.has(key)){
           seen.add(key);
-          const deParaNota=em.de||em.para?(`De: ${em.de||"?"} → Para: ${em.para||"?"}`):"";
+          const deParaNota=em.de||em.para?("De: "+(em.de||"?")+" - Para: "+(em.para||"?")):"";
           nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:deParaNota+(deParaNota?"\n":"")+em.cuerpo,fromDiio:false,pending:false});
           // already added via seen.add above
         }
