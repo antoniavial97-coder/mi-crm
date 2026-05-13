@@ -576,8 +576,8 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const pdfjsLib=(window as any).pdfjsLib;
-        // Disable worker to avoid CORS issues
-        pdfjsLib.GlobalWorkerOptions.workerSrc="";
+        // Use fake worker to avoid CORS issues
+        pdfjsLib.GlobalWorkerOptions.workerSrc=`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
         const pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuffer),useWorkerFetch:false,isEvalSupported:false,useSystemFonts:true}).promise;
         const pages:string[]=[];
         for(let i=1;i<=pdf.numPages;i++){
@@ -612,9 +612,8 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
         const key=`${em.fecha}|${em.de}`;
         if(!seen.has(key)){
           seen.add(key);
-          const deParaNota=em.de||em.para?`De: ${em.de||"?"} → Para: ${em.para||"?"}
-`:"";
-nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:deParaNota+em.cuerpo,fromDiio:false,pending:false});
+          const deParaNota=em.de||em.para?(`De: ${em.de||"?"} → Para: ${em.para||"?"}`):"";
+          nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:deParaNota+(deParaNota?"\n":"")+em.cuerpo,fromDiio:false,pending:false});
           // already added via seen.add above
         }
       }
