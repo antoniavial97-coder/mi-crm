@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
+// Increase body size limit for App Router
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   try {
+    // Check content length first
+    const contentLength = req.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) {
+      return NextResponse.json({ error: "PDF demasiado grande. Máximo 10MB." }, { status: 413 });
+    }
+
     const body = await req.json() as { pdfBase64?: string };
     const pdfBase64 = body.pdfBase64;
     if (!pdfBase64) return NextResponse.json({ error: "No PDF provided" }, { status: 400 });
+
+    // Check base64 size (~75% of original)
+    if (pdfBase64.length > 13 * 1024 * 1024) {
+      return NextResponse.json({ error: "PDF demasiado grande. Intentá con uno más pequeño." }, { status: 413 });
+    }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "API key not configured" }, { status: 500 });
@@ -36,26 +50,18 @@ export async function POST(req: NextRequest) {
       })
     });
 
-    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; error?: { message: string }; type?: string };
-    
-    if (!response.ok) {
-      return NextResponse.json({ error: data.error?.message || JSON.stringify(data) }, { status: 500 });
-    }
+    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; error?: { message: string } };
+    if (!response.ok) return NextResponse.json({ error: data.error?.message || JSON.stringify(data) }, { status: 500 });
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text || "").join("");
-    
-    if (!text) return NextResponse.json({ error: "Respuesta vacía de la IA" }, { status: 500 });
+    if (!text) return NextResponse.json({ error: "Respuesta vacía" }, { status: 500 });
 
     let emails: unknown[] = [];
-    try { 
-      const clean = text.replace(/```json|```/g, "").trim();
-      emails = JSON.parse(clean); 
-    } catch { 
-      return NextResponse.json({ error: `No se pudo parsear: ${text.substring(0, 200)}` }, { status: 500 }); 
-    }
+    try { emails = JSON.parse(text.replace(/```json|```/g, "").trim()); }
+    catch { return NextResponse.json({ error: `Parse error: ${text.substring(0, 200)}` }, { status: 500 }); }
 
     return NextResponse.json({ emails });
   } catch (e) {
-    return NextResponse.json({ error: `Error interno: ${String(e)}` }, { status: 500 });
+    return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
