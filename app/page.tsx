@@ -1306,8 +1306,8 @@ function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:strin
         </span>
         <span style={{color:D.ink3,flexShrink:0}}>{formatDateShort(act.fecha)}</span>
         {hasContent&&(
-          <span style={{color:resumen?D.ink2:D.ink3,flex:1,fontStyle:resumen?"normal":"italic"}}>
-            {resumen||"…"}
+          <span style={{color:D.ink2,flex:1}}>
+            {resumen}
           </span>
         )}
         {!hasContent&&act.nota&&<span style={{color:D.ink2,flex:1}}>{act.nota}</span>}
