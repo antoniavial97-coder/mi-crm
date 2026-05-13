@@ -1927,7 +1927,9 @@ export default function Home(){
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
-          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep,aiStatus:e.aiStatus,aiStatusDate:e.aiStatusDate}:c;
+          // Siempre preservar meetings locales si existen — nunca los pierdas
+          const localMeetings=e?.meetings||[];
+          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:localMeetings,lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep,aiStatus:e.aiStatus,aiStatusDate:e.aiStatusDate}:c;
         });
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
       }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
