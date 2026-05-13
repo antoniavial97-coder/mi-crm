@@ -553,54 +553,23 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     setParsingPDF(true);setPdfError("");
     try{
       const fileSizeMB=file.size/(1024*1024);
-      if(fileSizeMB>10){
-        setPdfError(`PDF demasiado grande (${fileSizeMB.toFixed(1)}MB). Máximo 10MB.`);
+      if(fileSizeMB>4){
+        setPdfError(`PDF muy grande (${fileSizeMB.toFixed(1)}MB). Exportá solo los correos relevantes (máx ~4MB).`);
         setParsingPDF(false);
         if(fileInputRef.current)fileInputRef.current.value="";
         return;
       }
-
-      // Extract text from PDF using pdf.js
-      const arrayBuffer=await file.arrayBuffer();
-      let pdfText="";
-      try{
-        // Load pdf.js dynamically
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if(!(window as any).pdfjsLib){
-          await new Promise<void>((res,rej)=>{
-            const s=document.createElement("script");
-            s.src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-            s.onload=()=>res();s.onerror=()=>rej();
-            document.head.appendChild(s);
-          });
-        }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const pdfjsLib=(window as any).pdfjsLib;
-        // Use fake worker to avoid CORS issues
-        pdfjsLib.GlobalWorkerOptions.workerSrc=`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-        const pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuffer),useWorkerFetch:false,isEvalSupported:false,useSystemFonts:true}).promise;
-        const pages:string[]=[];
-        for(let i=1;i<=pdf.numPages;i++){
-          const page=await pdf.getPage(i);
-          const content=await page.getTextContent();
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          pages.push(content.items.map((item:any)=>item.str||"").join(" "));
-        }
-        pdfText=pages.join("\n\n--- PÁGINA ---\n\n");
-        if(!pdfText.trim()){throw new Error("PDF sin texto extraíble");}
-      }catch(err){
-        setPdfError(`Error al leer el PDF: ${String(err).substring(0,100)}`);
-        setParsingPDF(false);
-        if(fileInputRef.current)fileInputRef.current.value="";
-        return;
-      }
-
-      // Send extracted text to backend
-      console.log("PDF text extracted, length:", pdfText.length, "preview:", pdfText.substring(0,500));
+      // Convert to base64
+      const base64=await new Promise<string>((res,rej)=>{
+        const r=new FileReader();
+        r.onload=()=>res((r.result as string).split(",")[1]);
+        r.onerror=rej;
+        r.readAsDataURL(file);
+      });
       const response=await fetch("/api/parse-email-pdf",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({pdfText})
+        body:JSON.stringify({pdfBase64:base64})
       });
       const data=await response.json() as {emails?:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>;error?:string};
       console.log("API response:", JSON.stringify(data).substring(0,500));
