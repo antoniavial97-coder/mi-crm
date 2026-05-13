@@ -570,14 +570,14 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
             role:"user",
             content:[
               {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
-              {type:"text",text:`Extrae todos los correos de esta cadena de email. Para cada correo devuelve un JSON array con objetos: {fecha: "YYYY-MM-DD", asunto: "string", cuerpo: "resumen breve de 1-2 oraciones del contenido"}. Ordena por fecha ascendente. Solo responde el JSON, sin markdown ni explicaciones.`}
+              {type:"text",text:`Extrae todos los correos de esta cadena de email enviados desde el 09/03/2026 en adelante (ignora los anteriores). Para cada correo devuelve un JSON array con objetos: {fecha: "YYYY-MM-DD", de: "nombre o email del remitente", para: "nombre o email del destinatario", asunto: "string", cuerpo: "resumen breve de 1-2 oraciones del contenido"}. Ordena por fecha ascendente. Solo responde el JSON puro, sin markdown ni explicaciones.`}
             ]
           }]
         })
       });
       const data=await response.json() as {content?:Array<{type:string;text?:string}>};
       const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text||"").join("");
-      let emails:Array<{fecha:string;asunto:string;cuerpo:string}>=[];
+      let emails:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>=[];
       try{emails=JSON.parse(text.replace(/```json|```/g,"").trim());}
       catch{setPdfError("No se pudo parsear el PDF. Intentá de nuevo.");setParsingPDF(false);return;}
 
@@ -587,7 +587,9 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
       for(const em of emails){
         const key=`${em.fecha}|${em.asunto}`;
         if(!existing.has(key)){
-          nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:em.cuerpo,fromDiio:false,pending:false});
+          const deParaNota=em.de||em.para?`De: ${em.de||"?"} → Para: ${em.para||"?"}
+`:"";
+nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:deParaNota+em.cuerpo,fromDiio:false,pending:false});
           existing.add(key);
         }
       }
