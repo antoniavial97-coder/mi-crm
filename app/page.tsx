@@ -1894,7 +1894,8 @@ function ResumenSemanal({clients,transcripts}:{clients:ClientRecord[];transcript
       // Diio
       const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
       for(const t of diio.slice(0,2)){
-        lines.push(`[REUNION DIIO ${t.date}] ${t.transcript?.substring(0,300)||""}`);
+        lines.push(`[REUNION DIIO ${t.date}]
+${t.transcript?.substring(0,600)||""}`);
       }
       if(lines.length===1)lines.push("Sin actividad reciente registrada");
       return lines.join("\n");
@@ -1967,7 +1968,8 @@ function buildCRMContext(clients:ClientRecord[],transcripts:TranscriptInfo[]):st
     // Meetings manuales
     const meetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date));
     for(const m of meetings.slice(0,5)){
-      lines.push(`[${m.type.toUpperCase()} ${m.date}${m.subject?" | "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
+      lines.push(`[${m.type.toUpperCase()} ${m.date}${m.subject?" | "+m.subject:""}]
+${m.notes?.substring(0,800)||""}`);
     }
     // Diio
     const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
