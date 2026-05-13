@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   try {
-    const { pdfBase64 } = await req.json() as { pdfBase64: string };
+    const body = await req.json() as { pdfBase64?: string };
+    const pdfBase64 = body.pdfBase64;
     if (!pdfBase64) return NextResponse.json({ error: "No PDF provided" }, { status: 400 });
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -14,6 +15,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": "pdfs-2024-09-25",
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
@@ -34,16 +36,26 @@ export async function POST(req: NextRequest) {
       })
     });
 
-    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; error?: { message: string } };
-    if (!response.ok) return NextResponse.json({ error: data.error?.message || "Error API" }, { status: 500 });
+    const data = await response.json() as { content?: Array<{ type: string; text?: string }>; error?: { message: string }; type?: string };
+    
+    if (!response.ok) {
+      return NextResponse.json({ error: data.error?.message || JSON.stringify(data) }, { status: 500 });
+    }
 
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text || "").join("");
+    
+    if (!text) return NextResponse.json({ error: "Respuesta vacía de la IA" }, { status: 500 });
+
     let emails: unknown[] = [];
-    try { emails = JSON.parse(text.replace(/```json|```/g, "").trim()); }
-    catch { return NextResponse.json({ error: "No se pudo parsear la respuesta" }, { status: 500 }); }
+    try { 
+      const clean = text.replace(/```json|```/g, "").trim();
+      emails = JSON.parse(clean); 
+    } catch { 
+      return NextResponse.json({ error: `No se pudo parsear: ${text.substring(0, 200)}` }, { status: 500 }); 
+    }
 
     return NextResponse.json({ emails });
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: `Error interno: ${String(e)}` }, { status: 500 });
   }
 }
