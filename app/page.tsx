@@ -8,7 +8,7 @@ type SubStage =
   | "Evaluación preliminar" | "Primera presentación preliminar"
   | "Visita técnica realizada" | "Presentación final"
   | "Contrato en revisión" | "Contrato firmado";
-type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana";
+type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana" | "chat";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
@@ -1953,6 +1953,126 @@ function ResumenSemanal({clients,transcripts}:{clients:ClientRecord[];transcript
   );
 }
 
+// --- Chat Tab ----------------------------------------------------------------
+type ChatMsg = {role:"user"|"assistant";text:string};
+
+function buildCRMContext(clients:ClientRecord[],transcripts:TranscriptInfo[]):string{
+  const active=clients.filter(c=>c.stage!=="Perdido");
+  const lines:string[]=["=== CONTEXTO CRM DE ANTONIA VIAL - SOLARITY ===\n"];
+  for(const c of active){
+    lines.push(`\n--- ${c.companyName} ---`);
+    lines.push(`Etapa: ${c.stage}${c.subStage?" / "+c.subStage:""} | ${c.mwp}MWp | Prob: ${c.closeProbabilityPct}%`);
+    if(c.nextStep)lines.push(`Próximo paso: ${c.nextStep}`);
+    if(c.aiStatus)lines.push(`Estado: ${c.aiStatus}`);
+    // Meetings manuales
+    const meetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date));
+    for(const m of meetings.slice(0,5)){
+      lines.push(`[${m.type.toUpperCase()} ${m.date}${m.subject?" | "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
+    }
+    // Diio
+    const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase()).sort((a,b)=>b.date.localeCompare(a.date));
+    for(const t of diio.slice(0,3)){
+      lines.push(`[REUNION DIIO ${t.date}] ${t.transcript?.substring(0,400)||""}`);
+    }
+    // Tareas
+    const tareas=(c.aiTasks||[]).filter(t=>!t.done);
+    if(tareas.length>0)lines.push(`Tareas pendientes: ${tareas.map(t=>t.text).join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
+function ChatTab({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+  const [msgs,setMsgs]=useState<ChatMsg[]>([{role:"assistant",text:"Hola Antonia 👋 Tengo acceso a toda la información de tus clientes — reuniones, correos, llamadas, tareas y etapas. ¿Qué querés saber?"}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const bottomRef=useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
+
+  async function send(){
+    const q=input.trim();
+    if(!q||loading)return;
+    setInput("");
+    setMsgs(prev=>[...prev,{role:"user",text:q}]);
+    setLoading(true);
+    try{
+      const ctx=buildCRMContext(clients,transcripts);
+      const history=msgs.slice(-6).map(m=>({role:m.role,content:m.text}));
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:"Chat CRM",
+          stage:"assistant",
+          comment:`Eres un asistente de ventas para Antonia Vial, Relationship Manager en Solarity (energía solar). Tenés acceso al historial completo de su CRM. Respondé de forma concisa y directa. Si te preguntan por un cliente específico, buscá su información en el contexto. Si no encontrás info, decilo.\n\nCONTEXTO CRM:\n${ctx}\n\nHISTORIAL DE CONVERSACIÓN:\n${history.map(m=>m.role+": "+m.content).join("\n")}\n\nPREGUNTA ACTUAL: ${q}`,
+          transcripts:[]
+        })
+      });
+      const data=await res.json() as {tasks?:string[]};
+      const reply=(data.tasks||[]).join("\n")||"No pude procesar esa consulta.";
+      setMsgs(prev=>[...prev,{role:"assistant",text:reply}]);
+    }catch{
+      setMsgs(prev=>[...prev,{role:"assistant",text:"Error al conectar. Intentá de nuevo."}]);
+    }
+    setLoading(false);
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",maxWidth:"860px",margin:"0 auto",animation:"fadeIn 0.2s ease"}}>
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:"12px",padding:"1rem 0"}}>
+        {msgs.map((m,i)=>(
+          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+            <div style={{
+              maxWidth:"78%",padding:"10px 14px",borderRadius:m.role==="user"?"16px 16px 4px 16px":"16px 16px 16px 4px",
+              background:m.role==="user"?D.accent:D.white,
+              color:m.role==="user"?"white":D.ink,
+              fontSize:"13px",lineHeight:1.6,
+              boxShadow:D.shadow,
+              border:m.role==="assistant"?`1px solid ${D.border}`:"none",
+              whiteSpace:"pre-wrap"
+            }}>
+              {m.role==="assistant"&&<span style={{fontSize:"10px",fontWeight:600,color:"#7C3AED",display:"block",marginBottom:"4px",letterSpacing:"0.05em"}}>✦ ASISTENTE</span>}
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {loading&&(
+          <div style={{display:"flex",justifyContent:"flex-start"}}>
+            <div style={{padding:"10px 14px",borderRadius:"16px 16px 16px 4px",background:D.white,border:`1px solid ${D.border}`,boxShadow:D.shadow,fontSize:"13px",color:"#7C3AED",fontStyle:"italic"}}>
+              ✦ Buscando en el CRM...
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+      {/* Sugerencias rápidas */}
+      {msgs.length===1&&(
+        <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}}>
+          {["¿Qué clientes no he contactado hace más de 14 días?","¿Cuál es el estado de Hacienda Chorombo?","¿Qué tareas tengo pendientes?","¿Qué se habló en la última reunión con Virutex Ilko?","¿Cuáles son mis mejores oportunidades esta semana?"].map((s,i)=>(
+            <button key={i} onClick={()=>{setInput(s);}} style={{padding:"6px 12px",borderRadius:"20px",border:`1px solid ${D.accentBorder}`,background:D.accentLight,fontSize:"11px",cursor:"pointer",color:D.accent,fontWeight:500}}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Input */}
+      <div style={{display:"flex",gap:"10px",padding:"12px 0",borderTop:`1px solid ${D.border}`}}>
+        <input
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+          placeholder="Preguntá sobre tus clientes, reuniones, correos, tareas..."
+          style={{...iStyle,flex:1,fontSize:"13px"}}
+          disabled={loading}
+        />
+        <button onClick={send} disabled={loading||!input.trim()} style={{padding:"9px 20px",borderRadius:"8px",border:"none",background:input.trim()&&!loading?D.accent:"#E5E7EB",color:input.trim()&&!loading?"white":D.ink3,fontSize:"13px",fontWeight:600,cursor:input.trim()&&!loading?"pointer":"default",transition:"all 0.15s",flexShrink:0}}>
+          Enviar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const [clients,setClients]=useState<ClientRecord[]>([]);
@@ -2134,6 +2254,7 @@ export default function Home(){
     ["pipeline1","Pipeline P1"],
     ["pipeline2","Pipeline P2"],
     ["prospectos","Prospectos"],
+    ["chat","✦ Chat"],
     ["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ],
   ];
 
@@ -2216,6 +2337,7 @@ export default function Home(){
         {activeTab==="pipeline2"&&<Pipeline2Tab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings} onUpdateNote={updateClientNote} onUpdateAIStatus={updateClientAIStatus}/>}
         {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
+        {activeTab==="chat"&&<ChatTab clients={activeClients} transcripts={transcripts}/>}
       </div>
 
       <Modal open={modalOpen} title={editingId?"Editar cliente":"Agregar cliente"} onClose={()=>setModalOpen(false)}>
