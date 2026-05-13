@@ -559,29 +559,15 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
         r.onerror=rej;
         r.readAsDataURL(file);
       });
-      // Send to Claude API to extract emails
-      const response=await fetch("https://api.anthropic.com/v1/messages",{
+      // Send to backend API route (CORS safe)
+      const response=await fetch("/api/parse-email-pdf",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:2000,
-          messages:[{
-            role:"user",
-            content:[
-              {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
-              {type:"text",text:`Extrae todos los correos de esta cadena de email enviados desde el 09/03/2026 en adelante (ignora los anteriores). Para cada correo devuelve un JSON array con objetos: {fecha: "YYYY-MM-DD", de: "nombre o email del remitente", para: "nombre o email del destinatario", asunto: "string", cuerpo: "resumen breve de 1-2 oraciones del contenido"}. Ordena por fecha ascendente. Solo responde el JSON puro, sin markdown ni explicaciones.`}
-            ]
-          }]
-        })
+        body:JSON.stringify({pdfBase64:base64})
       });
-      const data=await response.json() as {content?:Array<{type:string;text?:string}>};
-      const text=(data.content||[]).filter(b=>b.type==="text").map(b=>b.text||"").join("");
-      let emails:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>=[];
-      try{emails=JSON.parse(text.replace(/```json|```/g,"").trim());}
-      catch{setPdfError("No se pudo parsear el PDF. Intentá de nuevo.");setParsingPDF(false);return;}
-
-      // Add emails as meetings, skip duplicates
+      const data=await response.json() as {emails?:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>;error?:string};
+      if(!response.ok||data.error){setPdfError(data.error||"Error al procesar el PDF.");setParsingPDF(false);return;}
+      let emails:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>=data.emails||[];
       const existing=new Set(meetings.map(m=>`${m.date}|${m.subject}`));
       const nuevos:Meeting[]=[];
       for(const em of emails){
