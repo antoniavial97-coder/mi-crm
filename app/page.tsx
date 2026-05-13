@@ -604,18 +604,19 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
       const data=await response.json() as {emails?:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>;error?:string};
       if(!response.ok||data.error){setPdfError(data.error||"Error al procesar el PDF.");setParsingPDF(false);return;}
       let emails:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>=data.emails||[];
-      const existing=new Set(meetings.map(m=>`${m.date}|${m.subject}`));
+      const seen=new Set<string>();
       const nuevos:Meeting[]=[];
       for(const em of emails){
-        const key=`${em.fecha}|${em.asunto}`;
-        if(!existing.has(key)){
+        const key=`${em.fecha}|${em.de}`;
+        if(!seen.has(key)){
+          seen.add(key);
           const deParaNota=em.de||em.para?`De: ${em.de||"?"} → Para: ${em.para||"?"}
 `:"";
 nuevos.push({id:newId(),date:em.fecha,type:"correo",subject:em.asunto,notes:deParaNota+em.cuerpo,fromDiio:false,pending:false});
-          existing.add(key);
+          // already added via seen.add above
         }
       }
-      if(nuevos.length===0){setPdfError("No se encontraron correos nuevos — ya estaban todos registrados.");setParsingPDF(false);return;}
+      if(nuevos.length===0){setPdfError("No se encontraron correos desde el 09/03/2026.");setParsingPDF(false);return;}
       const updated=[...meetings,...nuevos].sort((a,b)=>a.date.localeCompare(b.date));
       setMeetings(updated);
       onUpdateMeetings(updated.filter(x=>!x.fromDiio));
