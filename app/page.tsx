@@ -552,7 +552,14 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     if(!file)return;
     setParsingPDF(true);setPdfError("");
     try{
-      // Convert PDF to base64
+      // Read PDF as text using FileReader + send as base64 but check size first
+      const fileSizeMB=file.size/(1024*1024);
+      if(fileSizeMB>3){
+        setPdfError(`PDF demasiado grande (${fileSizeMB.toFixed(1)}MB). Máximo 3MB. Intentá exportar solo la cadena relevante.`);
+        setParsingPDF(false);
+        if(fileInputRef.current)fileInputRef.current.value="";
+        return;
+      }
       const base64=await new Promise<string>((res,rej)=>{
         const r=new FileReader();
         r.onload=()=>res((r.result as string).split(",")[1]);
