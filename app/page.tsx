@@ -13,11 +13,14 @@ type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; d
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
 type Meeting = { id: string; date: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
+type StageChange = { date: string; stage: Stage; subStage?: SubStage; nextStep?: string; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
   stage: Stage; subStage?: SubStage; mwp: number; closeProbabilityPct: number;
   lastContactISO: string; nextAction: string; notes: string; stageDate?: string;
-  aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; ingressDate?: string; createdAtISO: string; updatedAtISO: string;
+  aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; ingressDate?: string;
+  createdAtISO: string; updatedAtISO: string;
+  stageHistory?: StageChange[]; nextStep?: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
@@ -152,6 +155,8 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     stage:(x.stage as Stage)??"Prospecto Pasivo",subStage:x.subStage as SubStage|undefined,
     mwp:typeof x.mwp==="number"?x.mwp:0,closeProbabilityPct:typeof x.closeProbabilityPct==="number"?x.closeProbabilityPct:0,
     lastContactISO:(x as Record<string,unknown>).lastContactISO as string||"",nextAction:x.nextAction??"",notes:x.notes??"",stageDate:x.stageDate as string|undefined,salesforce:Boolean((x as Record<string,unknown>).salesforce),ingressDate:(x as Record<string,unknown>).ingressDate as string|undefined,
+    stageHistory:Array.isArray((x as Record<string,unknown>).stageHistory)?(x as Record<string,unknown>).stageHistory as StageChange[]:undefined,
+    nextStep:(x as Record<string,unknown>).nextStep as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -547,8 +552,31 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
   return(
     <div>
-      {/* Stagedate info */}
-      {client.stageDate&&(
+      {/* Próximo paso */}
+      {client.nextStep&&(
+        <div style={{background:`${D.accent}10`,border:`1px solid ${D.accent}33`,borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",gap:"10px",alignItems:"flex-start"}}>
+          <span style={{fontSize:"14px",flexShrink:0}}>🎯</span>
+          <div>
+            <div style={{fontSize:"10px",fontWeight:600,color:D.accent,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"2px"}}>Próximo paso</div>
+            <div style={{fontSize:"12px",color:D.ink,lineHeight:1.4}}>{client.nextStep}</div>
+          </div>
+        </div>
+      )}
+      {/* Historial de etapas */}
+      {client.stageHistory&&client.stageHistory.length>1&&(
+        <div style={{marginBottom:"1rem"}}>
+          <div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}}>Historial de etapas</div>
+          <div style={{display:"flex",flexDirection:"column",gap:"4px"}}>
+            {client.stageHistory.map((h,i)=>(
+              <div key={i} style={{display:"flex",gap:"8px",alignItems:"flex-start",padding:"5px 8px",background:D.bg,borderRadius:"6px",fontSize:"11px"}}>
+                <span style={{color:D.ink3,flexShrink:0,minWidth:"75px"}}>{formatDateShort(h.date)}</span>
+                <span style={{fontWeight:500,color:D.ink}}>{h.subStage||h.stage}</span>
+                {h.nextStep&&<span style={{color:D.ink3,flex:1}}>→ {h.nextStep}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
         <div style={{background:"var(--color-background-secondary,#F8F7F4)",borderRadius:"10px",padding:"10px 14px",marginBottom:"1rem",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
           <div style={{fontSize:"11px",color:"#8A8A8A"}}>Etapa actual:</div>
           <div style={{fontSize:"12px",fontWeight:600,color:"#E8500A"}}>{client.subStage||client.stage}</div>
@@ -1446,7 +1474,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
       </div>
       <FiltrosPipeline subStages={P1_SUBSTAGE_ORDER} onFilter={setFiltro}/>
       <DashboardPanels clients={clients} transcripts={transcripts} onEdit={onEdit} onUpdateMeetings={onUpdateMeetings} onUpdateLastContact={onUpdateLastContact} onMarkContact={onMarkContact} recentContacts={recentContacts} alertOnly/>
-      <TareasPanelGroup clients={p1} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
           const items=bySubStage.get(sub)??[];
@@ -1487,7 +1515,7 @@ function Pipeline2Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
         ))}
       </div>
       <FiltrosPipeline subStages={[]} onFilter={setFiltro}/>
-      <TareasPanelGroup clients={p2} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:"10px"}}>
         {p2Filtered.length?p2Filtered.map(c=><ClientCard key={c.id} client={c} contacts={contacts} transcripts={transcripts} onEdit={onEdit} onDelete={onDelete} onUpdateMeetings={onUpdateMeetings} onUpdateNote={onUpdateNote}/>):(<div style={{gridColumn:"1/-1",borderRadius:"12px",border:`1px dashed ${D.border}`,padding:"2rem",textAlign:"center",fontSize:"13px",color:D.ink3}}>Sin clientes{filtro.soloSf||filtro.minMwp?" con estos filtros":" en Pipeline P2"}</div>)}
       </div>
@@ -1500,7 +1528,7 @@ function ProspectosTab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTas
   const pasivos=clients.filter(c=>c.stage==="Prospecto Pasivo");
   return(
     <div style={{display:"flex",flexDirection:"column",gap:"1.5rem"}}>
-      <TareasPanelGroup clients={[...activos,...pasivos]} onUpdateTasks={onUpdateTasks} transcripts={transcripts}/>
+      
       {[{label:"Prospectos Activos",items:activos},{label:"Prospectos Pasivos",items:pasivos}].map(({label,items})=>(
         <div key={label}>
           <div style={{fontSize:"14px",fontWeight:600,color:D.ink,marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px"}}>
@@ -1590,6 +1618,13 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
         )}
         <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>{draft.stage==="Perdido"?"Motivo de pérdida":"Comentario / último movimiento"}</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder={draft.stage==="Perdido"?"¿Qué pasó? ¿Por qué se perdió?":"¿Qué pasó? ¿Qué falta hacer?"}/></div>
         <div style={{gridColumn:"1/-1"}}>
+          <div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px",display:"flex",alignItems:"center",gap:"6px"}}>
+            Próximo paso concreto
+            <span style={{fontSize:"10px",color:D.ink3,fontWeight:400}}>¿Qué hay que hacer para avanzar?</span>
+          </div>
+          <input value={(draft as {nextStep?:string}).nextStep||""} onChange={e=>setDraft(d=>({...d,nextStep:e.target.value} as typeof d))} style={{...iStyle,borderLeft:`3px solid ${D.accent}`}} placeholder="Ej: Enviar propuesta técnica actualizada con BESS"/>
+        </div>
+        <div style={{gridColumn:"1/-1"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"5px"}}>
             <div style={{fontSize:"12px",fontWeight:500,color:D.ink2}}>Notas adicionales</div>
             <button disabled={extractTasksLoading} onClick={onExtract} style={{padding:"4px 12px",borderRadius:"8px",border:"1px solid #DDD6FE",background:"#F5F3FF",fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>{extractTasksLoading?"Extrayendo…":"Extraer tareas IA"}</button>
@@ -1643,7 +1678,7 @@ export default function Home(){
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
-          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:bestLastContact,createdAtISO:e.createdAtISO}:c;
+          return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:e.meetings||[],lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep}:c;
         });
         setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
       }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
@@ -1682,8 +1717,19 @@ export default function Home(){
     const now=todayISO();
     let prob=0;if(draft.stage==="Pipeline P2")prob=5;else if(draft.stage==="Pipeline P1"&&draft.subStage)prob=SUBSTAGE_PROB[draft.subStage];
     const n={...draft,closeProbabilityPct:prob,subStage:(draft.stage==="Pipeline P1"||draft.stage==="Pipeline P2")?draft.subStage:undefined};
-    if(!editingId){setClients(prev=>[{id:newId(),...n,createdAtISO:now,updatedAtISO:now},...prev]);}
-    else{setClients(prev=>prev.map(c=>c.id===editingId?{...c,...n,updatedAtISO:now}:c));}
+    if(!editingId){
+      const newHistory:StageChange[]=[{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}];
+      setClients(prev=>[{id:newId(),...n,createdAtISO:now,updatedAtISO:now,stageHistory:newHistory},...prev]);
+    } else {
+      setClients(prev=>prev.map(c=>{
+        if(c.id!==editingId)return c;
+        const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;
+        const newHistory:StageChange[]=stageChanged
+          ?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]
+          :(c.stageHistory||[]);
+        return {...c,...n,updatedAtISO:now,stageHistory:newHistory};
+      }));
+    }
     setModalOpen(false);
   }
   async function extractTasksWithAI(){
