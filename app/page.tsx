@@ -600,6 +600,8 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     setParsingPDF(false);
     if(fileInputRef.current)fileInputRef.current.value="";
   }
+
+  function markDone(id:string){
     const updated=meetings.map(m=>m.id===id?{...m,pending:false}:m);
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
