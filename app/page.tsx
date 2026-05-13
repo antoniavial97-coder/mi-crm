@@ -596,12 +596,14 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
       }
 
       // Send extracted text to backend
+      console.log("PDF text extracted, length:", pdfText.length, "preview:", pdfText.substring(0,500));
       const response=await fetch("/api/parse-email-pdf",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({pdfText})
       });
       const data=await response.json() as {emails?:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>;error?:string};
+      console.log("API response:", JSON.stringify(data).substring(0,500));
       if(!response.ok||data.error){setPdfError(data.error||"Error al procesar el PDF.");setParsingPDF(false);return;}
       let emails:Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}>=data.emails||[];
       const seen=new Set<string>();
