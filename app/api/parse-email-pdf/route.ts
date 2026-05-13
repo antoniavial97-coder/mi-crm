@@ -33,27 +33,25 @@ export async function POST(req: NextRequest) {
               type: "text",
               text: `Analiza este PDF que contiene una cadena de correos electrónicos de Outlook.
 
-IMPORTANTE: En Outlook, el correo MÁS RECIENTE aparece al INICIO/ARRIBA del PDF, y los más antiguos están al final/abajo. Debes leer TODOS los correos en todo el documento, incluyendo el primero que aparece al inicio.
+CONTEXTO: En Outlook exportado a PDF, el correo más reciente aparece al INICIO y los más antiguos al final. Además, cada correo suele incluir el historial citado de correos anteriores — esos correos citados NO deben extraerse de nuevo, ya que serán extraídos cuando aparezcan como correos independientes.
 
-INSTRUCCIONES:
-1. Lee el documento COMPLETO de principio a fin (página 1 hasta la última).
-2. Identifica CADA correo individual. Un nuevo correo comienza cuando aparece un bloque con "De:/From:", "Fecha:/Sent:/Enviado:", "Para:/To:".
-3. NO omitas ningún correo — extrae absolutamente todos los que encuentres.
-4. SOLO incluye correos con fecha igual o posterior al 09 de marzo de 2026 (2026-03-09). Descarta los anteriores.
-5. Convierte todas las fechas a formato YYYY-MM-DD.
+REGLAS ESTRICTAS:
+1. Extrae SOLO los correos que aparecen como mensajes NUEVOS/INDEPENDIENTES (con su propio encabezado completo De/Fecha/Para). NO extraigas los correos que aparecen citados/incluidos dentro de otro correo.
+2. Si dos correos tienen exactamente la misma fecha y remitente, es el mismo correo — incluye solo uno.
+3. SOLO incluye correos con fecha igual o posterior al 09 de marzo de 2026 (2026-03-09).
+4. Convierte todas las fechas a YYYY-MM-DD.
+5. Ordena el resultado por fecha ascendente (más antiguo primero).
 
-Devuelve ÚNICAMENTE un JSON array (sin markdown, sin explicaciones) ordenado por fecha ascendente:
+Devuelve ÚNICAMENTE un JSON array sin markdown:
 [
   {
     "fecha": "YYYY-MM-DD",
     "de": "nombre completo o email del remitente",
     "para": "nombre completo o email del destinatario principal",
     "asunto": "asunto del correo",
-    "cuerpo": "resumen de 1-2 oraciones del contenido principal del correo"
+    "cuerpo": "resumen de 1-2 oraciones del contenido principal"
   }
-]
-
-Si no hay correos desde el 09/03/2026, devuelve: []`
+]`
             }
           ]
         }]
@@ -66,12 +64,19 @@ Si no hay correos desde el 09/03/2026, devuelve: []`
     const text = (data.content || []).filter(b => b.type === "text").map(b => b.text || "").join("");
     if (!text) return NextResponse.json({ error: "Respuesta vacía" }, { status: 500 });
 
-    let emails: unknown[] = [];
+    let emails: Array<{fecha:string;de:string;para:string;asunto:string;cuerpo:string}> = [];
     try {
       const clean = text.replace(/```json|```/g, "").trim();
       emails = JSON.parse(clean);
-      // Filter by date as backup
-      emails = (emails as Array<{fecha:string}>).filter(e => e.fecha >= "2026-03-09");
+      // Filter by date + deduplicate by fecha+de
+      const seen = new Set<string>();
+      emails = emails.filter(e => {
+        if(e.fecha < "2026-03-09") return false;
+        const key = `${e.fecha}|${e.de}`;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     } catch {
       return NextResponse.json({ error: `Parse error: ${text.substring(0, 300)}` }, { status: 500 });
     }
