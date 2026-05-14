@@ -543,7 +543,11 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
   function addMeeting(){
     if(!newMeeting.notes.trim()&&!newMeeting.subject.trim())return;
-    const isPending=newMeeting.date>today;
+    const now=new Date();
+    const nowISO=todayISO();
+    const nowTime=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    // Pending si fecha futura, o si es hoy pero la hora aún no pasó
+    const isPending=newMeeting.date>nowISO||(newMeeting.date===nowISO&&!!newMeeting.time&&newMeeting.time>nowTime);
     const m:Meeting={id:newId(),date:newMeeting.date,time:newMeeting.time||undefined,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false,pending:isPending};
     const updated=[m,...meetings].sort((a,b)=>a.date.localeCompare(b.date)||(a.time||"").localeCompare(b.time||""));
     setMeetings(updated);
@@ -1889,8 +1893,14 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
   // Auto-mark past pending meetings as done
   useEffect(()=>{
     for(const c of clients){
+      const now=new Date();
+      const nowTime=`${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
       const updated=(c.meetings||[]).map(m=>{
-        if(m.pending&&!m.fromDiio&&m.date<hoy)return {...m,pending:false};
+        if(!m.pending||m.fromDiio)return m;
+        // Past date → mark done
+        if(m.date<hoy)return {...m,pending:false};
+        // Today + time already passed → mark done
+        if(m.date===hoy&&m.time&&m.time<nowTime)return {...m,pending:false};
         return m;
       });
       const changed=updated.some((m,i)=>m.pending!==(c.meetings||[])[i]?.pending);
