@@ -1883,7 +1883,60 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
 // --- Próximas Reuniones -------------------------------------------------------
 function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
   const [open,setOpen]=useState(true);
+  const [notifPerm,setNotifPerm]=useState<NotificationPermission>("default");
+  const notifiedRef=useRef<Set<string>>(new Set());
   const hoy=todayISO();
+
+  // Request notification permission on mount
+  useEffect(()=>{
+    if("Notification" in window){
+      setNotifPerm(Notification.permission);
+      if(Notification.permission==="default"){
+        Notification.requestPermission().then(p=>setNotifPerm(p));
+      }
+    }
+  },[]);
+
+  // Check every minute for upcoming meetings
+  useEffect(()=>{
+    function checkMeetings(){
+      if(!("Notification" in window)||Notification.permission!=="granted")return;
+      const now=new Date();
+      const hoyISO=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+      const nowMins=now.getHours()*60+now.getMinutes();
+      for(const c of clients){
+        for(const m of (c.meetings||[])){
+          if(!m.pending||m.fromDiio||!m.time||m.date!==hoyISO)continue;
+          const [hh,mm]=m.time.split(":").map(Number);
+          const meetingMins=hh*60+mm;
+          const diff=meetingMins-nowMins;
+          const key15=`${m.id}-15`;
+          const key0=`${m.id}-0`;
+          // 15 min before
+          if(diff>=14&&diff<=15&&!notifiedRef.current.has(key15)){
+            notifiedRef.current.add(key15);
+            new Notification(`📅 Reunión en 15 minutos`,{
+              body:`${c.companyName}${m.subject?" — "+m.subject:""} a las ${m.time} hrs`,
+              icon:"/favicon.ico",
+              tag:key15,
+            });
+          }
+          // At meeting time
+          if(diff>=0&&diff<=1&&!notifiedRef.current.has(key0)){
+            notifiedRef.current.add(key0);
+            new Notification(`🔔 Reunión ahora`,{
+              body:`${c.companyName}${m.subject?" — "+m.subject:""} a las ${m.time} hrs`,
+              icon:"/favicon.ico",
+              tag:key0,
+            });
+          }
+        }
+      }
+    }
+    checkMeetings();
+    const interval=setInterval(checkMeetings,60000);
+    return()=>clearInterval(interval);
+  },[clients]);
 
   // Collect all pending meetings across all clients
   const proximas=useMemo(()=>{
@@ -1930,7 +1983,18 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
         <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
           <div style={{width:"36px",height:"36px",borderRadius:"10px",background:proximas.length>0?"linear-gradient(135deg,#1D4ED8,#3B82F6)":"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>📅</div>
           <div style={{textAlign:"left"}}>
-            <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Próximas reuniones</div>
+            <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"8px"}}>
+              Próximas reuniones
+              {"Notification" in window&&(
+                <span style={{fontSize:"10px",padding:"2px 7px",borderRadius:"10px",fontWeight:500,
+                  background:notifPerm==="granted"?"#DCFCE7":notifPerm==="denied"?"#FEE2E2":"#F3F4F6",
+                  color:notifPerm==="granted"?"#16a34a":notifPerm==="denied"?"#dc2626":D.ink3,
+                  cursor:notifPerm==="default"?"pointer":"default"
+                }} onClick={()=>{if(notifPerm==="default")Notification.requestPermission().then(p=>setNotifPerm(p));}}>
+                  {notifPerm==="granted"?"🔔 Notif. activas":notifPerm==="denied"?"🔕 Notif. bloqueadas":"🔔 Activar notif."}
+                </span>
+              )}
+            </div>
             <div style={{fontSize:"11px",color:D.ink3}}>
               {proximas.length===0?"Sin reuniones agendadas":`${proximas.length} reunión${proximas.length>1?"es":""} pendiente${proximas.length>1?"s":""}`}
             </div>
