@@ -1967,11 +1967,29 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
     }
   },[hoy]);// eslint-disable-line
 
-  function markDone(clientId:string,meetingId:string){
+  const [completing,setCompleting]=useState<{clientId:string;meetingId:string;companyName:string;subject?:string}|null>(null);
+  const [completionNotes,setCompletionNotes]=useState("");
+  const [editing,setEditing]=useState<{clientId:string;meetingId:string}|null>(null);
+  const [editTime,setEditTime]=useState("");
+  const [editDate,setEditDate]=useState("");
+  const [editSubject,setEditSubject]=useState("");
+
+  function saveEdit(){
+    if(!editing)return;
+    const c=clients.find(x=>x.id===editing.clientId);
+    if(!c)return;
+    const updated=(c.meetings||[]).map(m=>m.id===editing.meetingId?{...m,time:editTime||undefined,date:editDate||m.date,subject:editSubject||m.subject}:m);
+    onUpdateMeetings(editing.clientId,updated.filter(m=>!m.fromDiio));
+    setEditing(null);
+  }
+
+  function markDone(clientId:string,meetingId:string,notes?:string){
     const c=clients.find(x=>x.id===clientId);
     if(!c)return;
-    const updated=(c.meetings||[]).map(m=>m.id===meetingId?{...m,pending:false}:m);
+    const updated=(c.meetings||[]).map(m=>m.id===meetingId?{...m,pending:false,notes:notes||m.notes}:m);
     onUpdateMeetings(clientId,updated.filter(m=>!m.fromDiio));
+    setCompleting(null);
+    setCompletionNotes("");
   }
 
   const hoy7=new Date();hoy7.setDate(hoy7.getDate()+7);
@@ -2027,11 +2045,62 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
                   {esHoy&&<span style={{fontSize:"10px",fontWeight:700,color:"#1D4ED8",background:"#DBEAFE",padding:"2px 8px",borderRadius:"20px"}}>HOY</span>}
                   {esSemana&&!esHoy&&<span style={{fontSize:"10px",color:"#16a34a",background:"#DCFCE7",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Esta semana</span>}
                   {esPasada&&<span style={{fontSize:"10px",color:"#dc2626",background:"#FEE2E2",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Vencida</span>}
-                  <button onClick={()=>markDone(client.id,meeting.id)} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2,fontWeight:500}}>✓ Realizada</button>
+                  <button onClick={()=>{setEditing({clientId:client.id,meetingId:meeting.id});setEditTime(meeting.time||"");setEditDate(meeting.date);setEditSubject(meeting.subject||"");}} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink3,fontWeight:500}}>✎ Editar</button>
+                  <button onClick={()=>{setCompleting({clientId:client.id,meetingId:meeting.id,companyName:client.companyName,subject:meeting.subject});setCompletionNotes(meeting.notes||"");}} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2,fontWeight:500}}>✓ Realizada</button>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+      {completing&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+          <div style={{background:D.white,borderRadius:"18px",padding:"1.5rem",maxWidth:"540px",width:"100%",boxShadow:D.shadowLg}}>
+            <div style={{fontSize:"15px",fontWeight:700,color:D.ink,marginBottom:"4px"}}>✓ Registrar reunión realizada</div>
+            <div style={{fontSize:"12px",color:D.ink3,marginBottom:"1.25rem"}}>{completing.companyName}{completing.subject?" — "+completing.subject:""}</div>
+            <div style={{display:"flex",gap:"8px",marginBottom:"1rem"}}>
+              <button onClick={()=>setCompletionNotes("")} style={{padding:"6px 14px",borderRadius:"8px",border:,background:D.bg,fontSize:"11px",cursor:"pointer",color:D.ink2}}>✍ Agregar notas manuales</button>
+              <button onClick={()=>setCompletionNotes("TRANSCRIPCIÓN DIIO:
+")} style={{padding:"6px 14px",borderRadius:"8px",border:,background:D.bg,fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>📋 Pegar transcripción Diio</button>
+            </div>
+            <textarea
+              value={completionNotes}
+              onChange={e=>setCompletionNotes(e.target.value)}
+              rows={6}
+              placeholder="Escribí lo que pasó en la reunión, acuerdos, próximos pasos... o pegá la transcripción de Diio"
+              style={{...iStyle,resize:"vertical",lineHeight:1.5,fontFamily:"inherit"}}
+              autoFocus
+            />
+            <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"1rem"}}>
+              <button onClick={()=>{setCompleting(null);setCompletionNotes("");}} style={{padding:"8px 16px",borderRadius:"8px",border:,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
+              <button onClick={()=>markDone(completing.clientId,completing.meetingId,completionNotes||undefined)} style={{padding:"8px 20px",borderRadius:"8px",border:"none",background:D.accent,color:"white",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>Guardar y marcar realizada</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editing&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+          <div style={{background:D.white,borderRadius:"18px",padding:"1.5rem",maxWidth:"400px",width:"100%",boxShadow:D.shadowLg}}>
+            <div style={{fontSize:"15px",fontWeight:700,color:D.ink,marginBottom:"1.25rem"}}>✎ Editar reunión agendada</div>
+            <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+              <div>
+                <div style={{fontSize:"11px",fontWeight:600,color:D.ink2,marginBottom:"5px"}}>Fecha</div>
+                <input type="date" value={editDate} onChange={e=>setEditDate(e.target.value)} style={iStyle}/>
+              </div>
+              <div>
+                <div style={{fontSize:"11px",fontWeight:600,color:D.ink2,marginBottom:"5px"}}>Hora</div>
+                <input type="time" value={editTime} onChange={e=>setEditTime(e.target.value)} style={iStyle}/>
+              </div>
+              <div>
+                <div style={{fontSize:"11px",fontWeight:600,color:D.ink2,marginBottom:"5px"}}>Asunto / descripción</div>
+                <input value={editSubject} onChange={e=>setEditSubject(e.target.value)} placeholder="Ej: Presentación propuesta técnica" style={iStyle}/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"1.25rem"}}>
+              <button onClick={()=>setEditing(null)} style={{padding:"8px 16px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
+              <button onClick={saveEdit} style={{padding:"8px 20px",borderRadius:"8px",border:"none",background:D.accent,color:"white",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>Guardar</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
