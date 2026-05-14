@@ -11,7 +11,7 @@ type SubStage =
 type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana" | "chat";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
-type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
+type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; urgent?: boolean; };
 type Meeting = { id: string; date: string; time?: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
 type StageChange = { date: string; stage: Stage; subStage?: SubStage; nextStep?: string; };
 type ClientRecord = {
@@ -381,18 +381,24 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
     setAiSuggestions(prev=>prev.filter(s=>s.text!==sugg.text));
   }
 
-  const pendientes=tasks.filter(t=>!t.done);
+  const pendientes=tasks.filter(t=>!t.done).sort((a,b)=>{
+    if(a.urgent&&!b.urgent)return -1;
+    if(!a.urgent&&b.urgent)return 1;
+    return 0;
+  });
   const completadas=tasks.filter(t=>t.done);
   const pendientesDeAyer=pendientes.filter(t=>t.date<hoy);
   const pendientesDeHoy=pendientes.filter(t=>t.date===hoy);
   const pipelineClients=clients.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2"||c.stage==="Prospecto Activo").sort((a,b)=>a.companyName.localeCompare(b.companyName));
 
   const renderTask=(t:DailyTask)=>(
-    <div key={t.id} style={{padding:"7px 10px",borderRadius:"8px",background:t.date<hoy?"#FFFBEB":t.done?"#F0FBF4":D.bg,border:t.date<hoy?"1px solid #FDE68A":"none",marginBottom:"4px"}}>
+    <div key={t.id} style={{padding:"7px 10px",borderRadius:"8px",background:t.urgent&&!t.done?"#FFF1F2":t.date<hoy?"#FFFBEB":t.done?"#F0FBF4":D.bg,border:t.urgent&&!t.done?"1px solid #FECDD3":t.date<hoy?"1px solid #FDE68A":"none",marginBottom:"4px"}}>
       <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
         <input type="checkbox" checked={t.done} onChange={()=>toggleTask(t.id)} style={{accentColor:t.done?"#16a34a":D.accent,flexShrink:0}}/>
+        {t.urgent&&!t.done&&<span style={{fontSize:"10px",fontWeight:700,color:"#dc2626",flexShrink:0}}>🔴 URGENTE</span>}
         <span style={{flex:1,fontSize:"12px",color:t.done?D.ink3:D.ink,textDecoration:t.done?"line-through":"none"}}>{t.text}</span>
         {t.date<hoy&&!t.done&&<span style={{fontSize:"10px",color:"#d97706",flexShrink:0}}>{t.date}</span>}
+        {!t.done&&<button onClick={()=>setTasks(prev=>prev.map(x=>x.id===t.id?{...x,urgent:!x.urgent}:x))} style={{background:"none",border:`1px solid ${t.urgent?"#FECDD3":D.border}`,borderRadius:"6px",cursor:"pointer",fontSize:"10px",color:t.urgent?"#dc2626":D.ink3,padding:"2px 6px",flexShrink:0}} title="Marcar urgente">🔴</button>}
         {!t.done&&<button onClick={()=>setEditingClientFor(editingClientFor===t.id?null:t.id)} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"6px",cursor:"pointer",fontSize:"10px",color:D.ink3,padding:"2px 6px",flexShrink:0}}>{t.clientName?"✎":"+ cliente"}</button>}
         <button onClick={()=>deleteTask(t.id)} style={{background:"none",border:"none",cursor:"pointer",color:D.ink3,fontSize:"12px",padding:"0 2px",flexShrink:0}}>×</button>
       </div>
