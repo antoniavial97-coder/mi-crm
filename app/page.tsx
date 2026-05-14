@@ -2059,9 +2059,9 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
             <div style={{fontSize:"15px",fontWeight:700,color:D.ink,marginBottom:"4px"}}>✓ Registrar reunión realizada</div>
             <div style={{fontSize:"12px",color:D.ink3,marginBottom:"1.25rem"}}>{completing.companyName}{completing.subject?" — "+completing.subject:""}</div>
             <div style={{display:"flex",gap:"8px",marginBottom:"1rem"}}>
-              <button onClick={()=>setCompletionNotes("")} style={{padding:"6px 14px",borderRadius:"8px",border:,background:D.bg,fontSize:"11px",cursor:"pointer",color:D.ink2}}>✍ Agregar notas manuales</button>
+              <button onClick={()=>setCompletionNotes("")} style={{padding:"6px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"11px",cursor:"pointer",color:D.ink2}}>✍ Agregar notas manuales</button>
               <button onClick={()=>setCompletionNotes("TRANSCRIPCIÓN DIIO:
-")} style={{padding:"6px 14px",borderRadius:"8px",border:,background:D.bg,fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>📋 Pegar transcripción Diio</button>
+")} style={{padding:"6px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>📋 Pegar transcripción Diio</button>
             </div>
             <textarea
               value={completionNotes}
@@ -2072,7 +2072,7 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
               autoFocus
             />
             <div style={{display:"flex",gap:"8px",justifyContent:"flex-end",marginTop:"1rem"}}>
-              <button onClick={()=>{setCompleting(null);setCompletionNotes("");}} style={{padding:"8px 16px",borderRadius:"8px",border:,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
+              <button onClick={()=>{setCompleting(null);setCompletionNotes("");}} style={{padding:"8px 16px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2}}>Cancelar</button>
               <button onClick={()=>markDone(completing.clientId,completing.meetingId,completionNotes||undefined)} style={{padding:"8px 20px",borderRadius:"8px",border:"none",background:D.accent,color:"white",fontSize:"12px",fontWeight:600,cursor:"pointer"}}>Guardar y marcar realizada</button>
             </div>
           </div>
