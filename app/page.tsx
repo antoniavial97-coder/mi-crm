@@ -1889,18 +1889,18 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
 
   // Request notification permission on mount
   useEffect(()=>{
-    if("Notification" in window){
-      setNotifPerm(Notification.permission);
-      if(Notification.permission==="default"){
-        Notification.requestPermission().then(p=>setNotifPerm(p));
-      }
+    if(typeof window==="undefined"||!("Notification" in window))return;
+    setNotifPerm(Notification.permission);
+    if(Notification.permission==="default"){
+      Notification.requestPermission().then(p=>setNotifPerm(p));
     }
   },[]);
 
   // Check every minute for upcoming meetings
   useEffect(()=>{
+    if(typeof window==="undefined"||!("Notification" in window))return;
     function checkMeetings(){
-      if(!("Notification" in window)||Notification.permission!=="granted")return;
+      if(Notification.permission!=="granted")return;
       const now=new Date();
       const hoyISO=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
       const nowMins=now.getHours()*60+now.getMinutes();
@@ -1985,12 +1985,12 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
           <div style={{textAlign:"left"}}>
             <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"8px"}}>
               Próximas reuniones
-              {"Notification" in window&&(
+              {typeof window!=="undefined"&&"Notification" in window&&(
                 <span style={{fontSize:"10px",padding:"2px 7px",borderRadius:"10px",fontWeight:500,
                   background:notifPerm==="granted"?"#DCFCE7":notifPerm==="denied"?"#FEE2E2":"#F3F4F6",
                   color:notifPerm==="granted"?"#16a34a":notifPerm==="denied"?"#dc2626":D.ink3,
                   cursor:notifPerm==="default"?"pointer":"default"
-                }} onClick={()=>{if(notifPerm==="default")Notification.requestPermission().then(p=>setNotifPerm(p));}}>
+                }} onClick={()=>{if(typeof window!=="undefined"&&notifPerm==="default")Notification.requestPermission().then(p=>setNotifPerm(p));}}>
                   {notifPerm==="granted"?"🔔 Notif. activas":notifPerm==="denied"?"🔕 Notif. bloqueadas":"🔔 Activar notif."}
                 </span>
               )}
