@@ -12,7 +12,7 @@ type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" |
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; };
-type Meeting = { id: string; date: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
+type Meeting = { id: string; date: string; time?: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
 type StageChange = { date: string; stage: Stage; subStage?: SubStage; nextStep?: string; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
@@ -534,7 +534,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
     return [...existing.filter(m=>!m.fromDiio),...diioMeetings].sort((a,b)=>b.date.localeCompare(a.date));
   });
   const [showForm,setShowForm]=useState(false);
-  const [newMeeting,setNewMeeting]=useState<{date:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:today,type:"reunion",subject:"",notes:""});
+  const [newMeeting,setNewMeeting]=useState<{date:string;time:string;type:"reunion"|"llamado"|"correo";subject:string;notes:string}>({date:today,time:"",type:"reunion",subject:"",notes:""});
   const [summarizing,setSummarizing]=useState<string|null>(null);
   const [summaries,setSummaries]=useState<Record<string,string>>({});
   const [parsingPDF,setParsingPDF]=useState(false);
@@ -544,11 +544,11 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
   function addMeeting(){
     if(!newMeeting.notes.trim()&&!newMeeting.subject.trim())return;
     const isPending=newMeeting.date>today;
-    const m:Meeting={id:newId(),date:newMeeting.date,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false,pending:isPending};
-    const updated=[m,...meetings].sort((a,b)=>b.date.localeCompare(a.date));
+    const m:Meeting={id:newId(),date:newMeeting.date,time:newMeeting.time||undefined,type:newMeeting.type,subject:newMeeting.subject||undefined,notes:newMeeting.notes,fromDiio:false,pending:isPending};
+    const updated=[m,...meetings].sort((a,b)=>a.date.localeCompare(b.date)||(a.time||"").localeCompare(b.time||""));
     setMeetings(updated);
     onUpdateMeetings(updated.filter(x=>!x.fromDiio));
-    setNewMeeting({date:today,type:"reunion",subject:"",notes:""});
+    setNewMeeting({date:today,time:"",type:"reunion",subject:"",notes:""});
     setShowForm(false);
   }
 
@@ -679,10 +679,14 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
 
       {showForm&&(
         <div style={{background:"#F8F7F4",borderRadius:"12px",padding:"14px",marginBottom:"1rem",display:"flex",flexDirection:"column",gap:"10px"}}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px"}}>
             <div>
               <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Fecha {newMeeting.date>today&&<span style={{color:"#1D4ED8",fontSize:"10px"}}>(se agenda como futura)</span>}</div>
               <input type="date" value={newMeeting.date} onChange={e=>setNewMeeting(p=>({...p,date:e.target.value}))} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Hora (opcional)</div>
+              <input type="time" value={newMeeting.time||""} onChange={e=>setNewMeeting(p=>({...p,time:e.target.value}))} style={{width:"100%",padding:"9px 12px",borderRadius:"10px",border:"1px solid #E8E6E1",background:"#FFFFFF",fontSize:"13px",color:"#1A1A1A",outline:"none",boxSizing:"border-box"}}/>
             </div>
             <div>
               <div style={{fontSize:"11px",color:"#4A4A4A",marginBottom:"4px",fontWeight:500}}>Tipo</div>
@@ -719,7 +723,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
               <div key={m.id} style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:"12px",padding:"12px 14px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}}>
                   <span style={{fontSize:"11px",fontWeight:600,color:"#1D4ED8"}}>{m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}</span>
-                  <span style={{fontSize:"11px",color:"#1D4ED8",fontWeight:500}}>{formatDateShort(m.date)}</span>
+                  <span style={{fontSize:"11px",color:"#1D4ED8",fontWeight:500}}>{formatDateShort(m.date)}{m.time&&" · "+m.time+" hrs"}</span>
                   <div style={{flex:1}}/>
                   <button onClick={()=>markDone(m.id)} style={{padding:"3px 10px",borderRadius:"6px",border:"1px solid #BFDBFE",background:"#FFFFFF",fontSize:"11px",cursor:"pointer",color:"#1D4ED8",fontWeight:600}}>✓ Realizada</button>
                   <button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"12px",padding:"2px 4px"}}>×</button>
@@ -743,7 +747,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
                 <span style={{fontSize:"11px",fontWeight:600,color:"#FFFFFF",background:m.type==="reunion"?"#E8500A":m.type==="llamado"?"#7C3AED":"#0891b2",padding:"2px 8px",borderRadius:"20px"}}>
                   {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}
                 </span>
-                <span style={{fontSize:"11px",color:"#8A8A8A"}}>{formatDateShort(m.date)}</span>
+                <span style={{fontSize:"11px",color:"#8A8A8A"}}>{formatDateShort(m.date)}{m.time&&" · "+m.time+" hrs"}</span>
                 {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
                 <div style={{flex:1}}/>
                 {!m.fromDiio&&<button onClick={()=>deleteMeeting(m.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#8A8A8A",fontSize:"12px",padding:"2px 6px"}}>×</button>}
@@ -1866,6 +1870,94 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
   );
 }
 
+// --- Próximas Reuniones -------------------------------------------------------
+function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];onUpdateMeetings:(id:string,meetings:Meeting[])=>void}){
+  const [open,setOpen]=useState(true);
+  const hoy=todayISO();
+
+  // Collect all pending meetings across all clients
+  const proximas=useMemo(()=>{
+    const result:Array<{client:ClientRecord;meeting:Meeting}>=[];
+    for(const c of clients){
+      for(const m of (c.meetings||[])){
+        if(m.pending&&!m.fromDiio)result.push({client:c,meeting:m});
+      }
+    }
+    return result.sort((a,b)=>a.meeting.date.localeCompare(b.meeting.date));
+  },[clients]);
+
+  // Auto-mark past pending meetings as done
+  useEffect(()=>{
+    for(const c of clients){
+      const updated=(c.meetings||[]).map(m=>{
+        if(m.pending&&!m.fromDiio&&m.date<hoy)return {...m,pending:false};
+        return m;
+      });
+      const changed=updated.some((m,i)=>m.pending!==(c.meetings||[])[i]?.pending);
+      if(changed)onUpdateMeetings(c.id,updated.filter(m=>!m.fromDiio));
+    }
+  },[hoy]);// eslint-disable-line
+
+  function markDone(clientId:string,meetingId:string){
+    const c=clients.find(x=>x.id===clientId);
+    if(!c)return;
+    const updated=(c.meetings||[]).map(m=>m.id===meetingId?{...m,pending:false}:m);
+    onUpdateMeetings(clientId,updated.filter(m=>!m.fromDiio));
+  }
+
+  const hoy7=new Date();hoy7.setDate(hoy7.getDate()+7);
+  const hoy7ISO=hoy7.toISOString().slice(0,10);
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden",boxShadow:D.shadow}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
+          <div style={{width:"36px",height:"36px",borderRadius:"10px",background:proximas.length>0?"linear-gradient(135deg,#1D4ED8,#3B82F6)":"#F3F4F6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>📅</div>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>Próximas reuniones</div>
+            <div style={{fontSize:"11px",color:D.ink3}}>
+              {proximas.length===0?"Sin reuniones agendadas":`${proximas.length} reunión${proximas.length>1?"es":""} pendiente${proximas.length>1?"s":""}`}
+            </div>
+          </div>
+        </div>
+        <span style={{color:D.ink3,fontSize:"11px"}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&(
+        <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 18px",display:"flex",flexDirection:"column",gap:"8px"}}>
+          {proximas.length===0&&(
+            <div style={{textAlign:"center",padding:"1rem",color:D.ink3,fontSize:"12px"}}>No hay reuniones agendadas. Agregá una desde el historial de un cliente.</div>
+          )}
+          {proximas.map(({client,meeting})=>{
+            const esHoy=meeting.date===hoy;
+            const esSemana=meeting.date>hoy&&meeting.date<=hoy7ISO;
+            const esPasada=meeting.date<hoy;
+            return(
+              <div key={meeting.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 14px",borderRadius:"10px",background:esHoy?"#EFF6FF":esPasada?"#FEF2F2":D.bg,border:`1px solid ${esHoy?"#BFDBFE":esPasada?"#FECACA":D.border}`}}>
+                <div style={{flexShrink:0,textAlign:"center",minWidth:"48px"}}>
+                  <div style={{fontSize:"18px",fontWeight:700,color:esHoy?"#1D4ED8":esPasada?"#dc2626":D.ink,lineHeight:1}}>{meeting.date.slice(8)}</div>
+                  <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase"}}>{["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"][parseInt(meeting.date.slice(5,7))-1]}</div>
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:"12px",fontWeight:600,color:D.ink}}>{client.companyName}</div>
+                  {meeting.time&&<div style={{fontSize:"11px",color:"#1D4ED8",fontWeight:600,marginTop:"1px"}}>🕐 {meeting.time} hrs</div>}
+                  {meeting.subject&&<div style={{fontSize:"11px",color:D.ink2,marginTop:"2px"}}>{meeting.subject}</div>}
+                  {meeting.notes&&<div style={{fontSize:"11px",color:D.ink3,marginTop:"2px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meeting.notes}</div>}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:"6px",flexShrink:0}}>
+                  {esHoy&&<span style={{fontSize:"10px",fontWeight:700,color:"#1D4ED8",background:"#DBEAFE",padding:"2px 8px",borderRadius:"20px"}}>HOY</span>}
+                  {esSemana&&!esHoy&&<span style={{fontSize:"10px",color:"#16a34a",background:"#DCFCE7",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Esta semana</span>}
+                  {esPasada&&<span style={{fontSize:"10px",color:"#dc2626",background:"#FEE2E2",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Vencida</span>}
+                  <button onClick={()=>markDone(client.id,meeting.id)} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2,fontWeight:500}}>✓ Realizada</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Resumen Semanal IA -------------------------------------------------------
 const RESUMEN_KEY = "solar-crm:resumen-semanal";
 type ResumenData = { fecha: string; texto: string; };
@@ -2328,6 +2420,7 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <ResumenSemanal clients={activeClients} transcripts={transcripts}/>
             <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
