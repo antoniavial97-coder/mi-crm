@@ -2060,8 +2060,7 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
             <div style={{fontSize:"12px",color:D.ink3,marginBottom:"1.25rem"}}>{completing.companyName}{completing.subject?" — "+completing.subject:""}</div>
             <div style={{display:"flex",gap:"8px",marginBottom:"1rem"}}>
               <button onClick={()=>setCompletionNotes("")} style={{padding:"6px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"11px",cursor:"pointer",color:D.ink2}}>✍ Agregar notas manuales</button>
-              <button onClick={()=>setCompletionNotes("TRANSCRIPCIÓN DIIO:
-")} style={{padding:"6px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>📋 Pegar transcripción Diio</button>
+              <button onClick={()=>setCompletionNotes("Transcripcion Diio:\n")} style={{padding:"6px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"11px",cursor:"pointer",color:"#7C3AED"}}>📋 Pegar transcripción Diio</button>
             </div>
             <textarea
               value={completionNotes}
