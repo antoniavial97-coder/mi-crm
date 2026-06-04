@@ -175,7 +175,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
     meetings:Array.isArray((x as Record<string,unknown>).meetings)
-      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),time:m.time as string|undefined,type:(m.type as "reunion"|"llamado"|"correo"|"tarea")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio),pending:Boolean(m.pending)}))
+      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),time:m.time as string|undefined,type:((m.notes as string||'').startsWith('Tarea completada:')?'tarea':(m.type as "reunion"|"llamado"|"correo"|"tarea")||"reunion"),subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio),pending:Boolean(m.pending)}))
       :[],
     createdAtISO:typeof x.createdAtISO==="string"?x.createdAtISO:todayISO(),
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
