@@ -12,7 +12,7 @@ type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" |
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; urgent?: boolean; };
-type Meeting = { id: string; date: string; time?: string; type: "reunion"|"llamado"|"correo"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
+type Meeting = { id: string; date: string; time?: string; type: "reunion"|"llamado"|"correo"|"tarea"; subject?: string; summary?: string; notes?: string; fromDiio?: boolean; pending?: boolean; };
 type StageChange = { date: string; stage: Stage; subStage?: SubStage; nextStep?: string; };
 type ClientRecord = {
   id: string; companyName: string; contactName: string;
@@ -175,7 +175,7 @@ function safeParseClients(raw:string|null):ClientRecord[]{
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
     meetings:Array.isArray((x as Record<string,unknown>).meetings)
-      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),type:(m.type as "reunion"|"llamado"|"correo")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio),pending:Boolean(m.pending)}))
+      ?((x as Record<string,unknown>).meetings as Array<Record<string,unknown>>).map((m)=>({id:String(m.id||newId()),date:String(m.date||""),time:m.time as string|undefined,type:(m.type as "reunion"|"llamado"|"correo"|"tarea")||"reunion",subject:m.subject as string|undefined,summary:m.summary as string|undefined,notes:m.notes as string|undefined,fromDiio:Boolean(m.fromDiio),pending:Boolean(m.pending)}))
       :[],
     createdAtISO:typeof x.createdAtISO==="string"?x.createdAtISO:todayISO(),
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
@@ -256,7 +256,7 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
   const key=c.companyName.toLowerCase();
   const recentAll={...recentContacts,...getRecentContacts()};
   if(recentAll[key]){const d=new Date(recentAll[key]);if(!isNaN(d.getTime()))fechas.push(d);}
-  for(const m of (c.meetings||[])){if(!m.pending){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}}
+  for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
   for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){
     let fechaNorm=t.date;
     if(t.date&&t.date.includes("/")){const p=t.date.split("/");if(p.length===3){fechaNorm=p[2].length===4?`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`:`${p[0]}-${p[1].padStart(2,"0")}-${p[2].padStart(2,"0")}`;}}
@@ -318,7 +318,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
       if(nowDone&&t.clientId){
         const client=clients.find(c=>c.id===t.clientId);
         if(client){
-          const tipo:Meeting["type"]=/correo|email|mail|enviar/i.test(t.text)?"correo":/llamar|llamado|teléfono/i.test(t.text)?"llamado":"reunion";
+          const tipo:Meeting["type"]="tarea";
           const m:Meeting={id:newId(),date:hoy,type:tipo,notes:`Tarea completada: ${t.text}`,fromDiio:false,pending:false};
           onUpdateMeetings(t.clientId,[...(client.meetings||[]),m]);
           onUpdateLastContact(t.clientId);
@@ -732,7 +732,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
             {pendientes.map(m=>(
               <div key={m.id} style={{background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:"12px",padding:"12px 14px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"4px"}}>
-                  <span style={{fontSize:"11px",fontWeight:600,color:"#1D4ED8"}}>{m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}</span>
+                  <span style={{fontSize:"11px",fontWeight:600,color:"#1D4ED8"}}>{m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":m.type==="tarea"?"✓ Tarea":"✉ Correo"}</span>
                   <span style={{fontSize:"11px",color:"#1D4ED8",fontWeight:500}}>{formatDateShort(m.date)}{m.time&&" · "+m.time+" hrs"}</span>
                   <div style={{flex:1}}/>
                   <button onClick={()=>markDone(m.id)} style={{padding:"3px 10px",borderRadius:"6px",border:"1px solid #BFDBFE",background:"#FFFFFF",fontSize:"11px",cursor:"pointer",color:"#1D4ED8",fontWeight:600}}>✓ Realizada</button>
@@ -755,7 +755,7 @@ function ClientDetailModal({client,transcripts,onUpdateMeetings,onClose}:{client
             <div key={m.id} style={{background:"#F8F7F4",borderRadius:"12px",padding:"12px 14px",border:"1px solid #E8E6E1"}}>
               <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
                 <span style={{fontSize:"11px",fontWeight:600,color:"#FFFFFF",background:m.type==="reunion"?"#E8500A":m.type==="llamado"?"#7C3AED":"#0891b2",padding:"2px 8px",borderRadius:"20px"}}>
-                  {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo"}
+                  {m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":m.type==="tarea"?"✓ Tarea":"✉ Correo"}
                 </span>
                 <span style={{fontSize:"11px",color:"#8A8A8A"}}>{formatDateShort(m.date)}{m.time&&" · "+m.time+" hrs"}</span>
                 {m.fromDiio&&<span style={{fontSize:"9px",color:"#7C3AED",background:"#F5F3FF",padding:"1px 6px",borderRadius:"10px",fontWeight:500}}>Diio</span>}
@@ -818,7 +818,7 @@ function TareasPanel({client,onUpdateTasks,transcripts}:{client:ClientRecord;onU
       .filter(m=>!m.fromDiio&&!m.pending)
       .sort((a,b)=>b.date.localeCompare(a.date))
       .slice(0,5)
-      .map(m=>`[${m.type==="correo"?"Correo":m.type==="llamado"?"Llamado":"Reunión"} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
+      .map(m=>`[${m.type==="correo"?"Correo":m.type==="llamado"?"Llamado":m.type==="tarea"?"Tarea":"Reunión"} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
     const completedTasks=tasks
       .filter(t=>t.done)
       .slice(-5)
@@ -1303,8 +1303,8 @@ function ActividadRow({act,clientName}:{act:{tipo:string;fecha:string;nota:strin
   const esTarea=act.tipo.startsWith("✓")||act.tipo.startsWith("📋")||act.pendiente;
   const hasContent=!esTarea&&act.nota&&act.nota.trim().length>3;
 
-  const icono=act.tipo.toLowerCase().includes("correo")?"✉":act.tipo.toLowerCase().includes("llamado")?"📞":act.tipo.toLowerCase().includes("reuni")?"📅":"📌";
-  const tipoLabel=act.tipo.toLowerCase().includes("correo")?"Correo":act.tipo.toLowerCase().includes("llamado")?"Llamado":act.tipo.toLowerCase().includes("reuni")?"Reunión":act.tipo;
+  const icono=act.tipo.toLowerCase().includes("correo")?"✉":act.tipo.toLowerCase().includes("llamado")?"📞":act.tipo.toLowerCase().includes("reuni")?"📅":act.tipo.toLowerCase().includes("tarea")||act.tipo.startsWith("✓")?"✓":"📌";
+  const tipoLabel=act.tipo.toLowerCase().includes("correo")?"Correo":act.tipo.toLowerCase().includes("llamado")?"Llamado":act.tipo.toLowerCase().includes("reuni")?"Reunión":act.tipo.toLowerCase().includes("tarea")||act.tipo.startsWith("✓")?"Tarea":act.tipo;
   const contenido=(act.nota||"").replace(/^De:.*?- Para:.*?\n/,"").trim();
 
   useEffect(()=>{
@@ -1393,7 +1393,7 @@ function SemanaTab({clients,transcripts,onUpdateTasks}:{clients:ClientRecord[];t
       for(const m of (client.meetings||[])){
         const meetingMonth=m.date.substring(0,7); // YYYY-MM
         if(meetingMonth===mesSel){
-          const tipo=m.pending?"🗓 Agendado":m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":"✉ Correo";
+          const tipo=m.pending?"🗓 Agendado":m.type==="reunion"?"📅 Reunión":m.type==="llamado"?"📞 Llamado":m.type==="tarea"?"✓ Tarea":"✉ Correo";
           acts.push({tipo,fecha:m.date,nota:m.notes||m.subject||"",pendiente:!!m.pending});
         }
       }
@@ -2027,7 +2027,8 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
           )}
           {proximas.map(({client,meeting})=>{
             const esHoy=meeting.date===hoy;
-            const esSemana=meeting.date>hoy&&meeting.date<=hoy7ISO;
+            const diffDays=Math.round((new Date(meeting.date).getTime()-new Date(hoy).getTime())/(1000*60*60*24));
+            const esSemana=diffDays>0&&diffDays<=7;
             const esPasada=meeting.date<hoy;
             return(
               <div key={meeting.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 14px",borderRadius:"10px",background:esHoy?"#EFF6FF":esPasada?"#FEF2F2":D.bg,border:`1px solid ${esHoy?"#BFDBFE":esPasada?"#FECACA":D.border}`}}>
@@ -2043,7 +2044,7 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
                 </div>
                 <div style={{display:"flex",alignItems:"center",gap:"6px",flexShrink:0}}>
                   {esHoy&&<span style={{fontSize:"10px",fontWeight:700,color:"#1D4ED8",background:"#DBEAFE",padding:"2px 8px",borderRadius:"20px"}}>HOY</span>}
-                  {esSemana&&!esHoy&&<span style={{fontSize:"10px",color:"#16a34a",background:"#DCFCE7",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Esta semana</span>}
+                  {esSemana&&!esHoy&&<span style={{fontSize:"10px",color:"#16a34a",background:"#DCFCE7",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>{diffDays===1?"Mañana":"En "+diffDays+" días"}</span>}
                   {esPasada&&<span style={{fontSize:"10px",color:"#dc2626",background:"#FEE2E2",padding:"2px 8px",borderRadius:"20px",fontWeight:600}}>Vencida</span>}
                   <button onClick={()=>{setEditing({clientId:client.id,meetingId:meeting.id});setEditTime(meeting.time||"");setEditDate(meeting.date);setEditSubject(meeting.subject||"");}} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink3,fontWeight:500}}>✎ Editar</button>
                   <button onClick={()=>{setCompleting({clientId:client.id,meetingId:meeting.id,companyName:client.companyName,subject:meeting.subject});setCompletionNotes(meeting.notes||"");}} style={{padding:"4px 10px",borderRadius:"7px",border:`1px solid ${D.border}`,background:D.white,fontSize:"11px",cursor:"pointer",color:D.ink2,fontWeight:500}}>✓ Realizada</button>
