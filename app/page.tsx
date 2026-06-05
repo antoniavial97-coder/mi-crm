@@ -2901,7 +2901,7 @@ export default function Home(){
             {activeTab==="dashboard"&&<span style={{fontSize:"12px",color:D.ink3,marginLeft:"8px"}}>Pipeline total: {metrics.mwpTotal.toFixed(1)} MWp</span>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <UserButton afterSignOutUrl="/sign-in"/>
+            <UserButton/>
           </div>
         </div>
 
