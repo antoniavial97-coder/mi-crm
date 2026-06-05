@@ -2512,10 +2512,107 @@ function ChatTab({clients,transcripts}:{clients:ClientRecord[];transcripts:Trans
   );
 }
 
+// --- Config Screen ------------------------------------------------------------
+type UserConfig = {sheetUrl:string;contactsUrl:string;transcriptsUrl:string};
+
+async function loadUserConfig(userId:string):Promise<UserConfig|null>{
+  try{
+    const res=await fetch(`https://wgngndqntrxndltbnexr.supabase.co/rest/v1/user_config?user_id=eq.${userId}&select=config`,{
+      headers:{"apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndnbmduZHFudHJ4bmRsdGJuZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MjExOTUsImV4cCI6MjA5NjE5NzE5NX0.pZqYwlYCa1Iv4DJ5gcPJGXuUgc2PUbj80z8YPRw_T9U","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndnbmduZHFudHJ4bmRsdGJuZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MjExOTUsImV4cCI6MjA5NjE5NzE5NX0.pZqYwlYCa1Iv4DJ5gcPJGXuUgc2PUbj80z8YPRw_T9U"}
+    });
+    const data=await res.json() as Array<{config:UserConfig}>;
+    return data?.[0]?.config||null;
+  }catch{return null;}
+}
+
+async function saveUserConfig(userId:string,config:UserConfig):Promise<void>{
+  await fetch("https://wgngndqntrxndltbnexr.supabase.co/rest/v1/user_config",{
+    method:"POST",
+    headers:{"apikey":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndnbmduZHFudHJ4bmRsdGJuZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MjExOTUsImV4cCI6MjA5NjE5NzE5NX0.pZqYwlYCa1Iv4DJ5gcPJGXuUgc2PUbj80z8YPRw_T9U","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndnbmduZHFudHJ4bmRsdGJuZXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MjExOTUsImV4cCI6MjA5NjE5NzE5NX0.pZqYwlYCa1Iv4DJ5gcPJGXuUgc2PUbj80z8YPRw_T9U","Content-Type":"application/json","Prefer":"resolution=merge-duplicates,return=minimal"},
+    body:JSON.stringify({user_id:userId,config,updated_at:new Date().toISOString()})
+  });
+}
+
+function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void}){
+  const [sheetId,setSheetId]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+
+  function extractSheetId(url:string):string{
+    const m=url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    return m?m[1]:url.trim();
+  }
+
+  async function handleSave(){
+    const id=extractSheetId(sheetId);
+    if(!id){setError("Pegá el link de tu Google Sheet");return;}
+    setSaving(true);
+    const base=`https://docs.google.com/spreadsheets/d/e/${id}/pub?single=true&output=csv`;
+    const config:UserConfig={
+      sheetUrl:`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=0`,
+      contactsUrl:`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=652559693`,
+      transcriptsUrl:`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=1050795278`,
+    };
+    // Try to detect if it's a published URL (pub) or regular sheet
+    const pubBase=url=>url.includes("/pub?")?url:
+      `https://docs.google.com/spreadsheets/d/e/${id}/pub?single=true&output=csv`;
+    
+    // Just use the sheet ID to build CSV URLs
+    const finalConfig:UserConfig={
+      sheetUrl:sheetId.includes("pub?")?sheetId:
+        `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&sheet=0`,
+      contactsUrl:`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=652559693`,
+      transcriptsUrl:`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=1050795278`,
+    };
+    await saveUserConfig(userId,finalConfig);
+    setSaving(false);
+    onSave(finalConfig);
+  }
+
+  return(
+    <div style={{minHeight:"100dvh",background:D.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:"2rem"}}>
+      <div style={{background:D.white,borderRadius:"20px",padding:"2.5rem",maxWidth:"560px",width:"100%",boxShadow:D.shadowLg}}>
+        <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"2rem"}}>
+          <img src={LOGO_B64} alt="Solarity" style={{height:"28px"}}/>
+          <div style={{width:"1px",height:"20px",background:D.border}}/>
+          <span style={{fontSize:"15px",fontWeight:600,color:D.ink}}>CRM de Ventas</span>
+        </div>
+        <div style={{fontSize:"20px",fontWeight:700,color:D.ink,marginBottom:"8px"}}>Bienvenido 👋</div>
+        <div style={{fontSize:"13px",color:D.ink2,marginBottom:"2rem",lineHeight:1.6}}>
+          Para comenzar, pegá el link de tu Google Sheet con los datos de clientes. Debe ser un sheet publicado en la web (Archivo → Compartir → Publicar en la web).
+        </div>
+        <div style={{marginBottom:"1rem"}}>
+          <div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"6px"}}>Link del Google Sheet</div>
+          <input
+            value={sheetId}
+            onChange={e=>{setSheetId(e.target.value);setError("");}}
+            placeholder="https://docs.google.com/spreadsheets/d/..."
+            style={{...iStyle,fontSize:"13px"}}
+          />
+          {error&&<div style={{fontSize:"11px",color:"#dc2626",marginTop:"4px"}}>{error}</div>}
+        </div>
+        <div style={{background:"#F0F9FF",borderRadius:"10px",padding:"10px 14px",marginBottom:"1.5rem",fontSize:"11px",color:"#0369A1",lineHeight:1.6}}>
+          <strong>Cómo publicar tu sheet:</strong> Abrí el Google Sheet → Archivo → Compartir → Publicar en la web → Publicar. Luego copiá el link de la hoja.
+        </div>
+        <button onClick={handleSave} disabled={saving||!sheetId.trim()} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"none",background:sheetId.trim()?D.accent:"#E5E7EB",color:sheetId.trim()?"white":D.ink3,fontSize:"14px",fontWeight:600,cursor:sheetId.trim()?"pointer":"default"}}>
+          {saving?"Guardando...":"Comenzar →"}
+        </button>
+        <div style={{marginTop:"1rem",textAlign:"center"}}>
+          <button onClick={()=>onSave({sheetUrl:SHEET_CSV_URL,contactsUrl:CONTACTS_CSV_URL,transcriptsUrl:TRANSCRIPTS_CSV_URL})} style={{background:"none",border:"none",cursor:"pointer",fontSize:"11px",color:D.ink3,textDecoration:"underline"}}>
+            Usar sheet de demo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const {user,isLoaded}=useUser();
   const userId=user?.id||"";
+  const [userConfig,setUserConfig]=useState<UserConfig|null>(null);
+  const [configLoading,setConfigLoading]=useState(true);
   const [clients,setClients]=useState<ClientRecord[]>([]);
   const [contacts,setContacts]=useState<ContactInfo[]>([]);
   const [transcripts,setTranscripts]=useState<TranscriptInfo[]>([]);
@@ -2534,10 +2631,13 @@ export default function Home(){
     if(!userId)return;
     setSheetStatus("loading");
     try{
+      const sheetUrl=userConfig?.sheetUrl||SHEET_CSV_URL;
+      const contactsUrl=userConfig?.contactsUrl||CONTACTS_CSV_URL;
+      const transcriptsUrl=userConfig?.transcriptsUrl||TRANSCRIPTS_CSV_URL;
       const [res1,res2,res3]=await Promise.all([
-        fetch(`/api/sheet-proxy?url=${encodeURIComponent(SHEET_CSV_URL)}`),
-        fetch(`/api/sheet-proxy?url=${encodeURIComponent(CONTACTS_CSV_URL)}`),
-        fetch(`/api/sheet-proxy?url=${encodeURIComponent(TRANSCRIPTS_CSV_URL)}`),
+        fetch(`/api/sheet-proxy?url=${encodeURIComponent(sheetUrl)}`),
+        fetch(`/api/sheet-proxy?url=${encodeURIComponent(contactsUrl)}`),
+        fetch(`/api/sheet-proxy?url=${encodeURIComponent(transcriptsUrl)}`),
       ]);
       if(!res1.ok)throw new Error();
       const csv1=await res1.text();
@@ -2574,8 +2674,15 @@ export default function Home(){
     }
   },[userId]);
 
-  // Load data when user is ready
-  useEffect(()=>{if(isLoaded&&userId)loadFromSheet();},[isLoaded,userId,loadFromSheet]);
+  // Load user config then data
+  useEffect(()=>{
+    if(!isLoaded||!userId)return;
+    loadUserConfig(userId).then(cfg=>{
+      if(cfg){setUserConfig(cfg);}
+      setConfigLoading(false);
+    });
+  },[isLoaded,userId]);
+  useEffect(()=>{if(userConfig&&userId)loadFromSheet();},[userConfig,userId,loadFromSheet]);
   // Save to Supabase whenever clients change
   useEffect(()=>{if(clients.length>0&&userId){saveClientsToSupabase(userId,clients);}},[clients,userId]);
 
@@ -2701,6 +2808,13 @@ export default function Home(){
     ["chat","✦ Chat"],
     ["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ],
   ];
+
+  if(!isLoaded||configLoading)return(
+    <div style={{minHeight:"100dvh",background:D.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{fontSize:"13px",color:D.ink3}}>Cargando...</div>
+    </div>
+  );
+  if(!userConfig)return <ConfigScreen userId={userId} onSave={cfg=>{setUserConfig(cfg);}}/>;
 
   return(
     <div style={{minHeight:"100dvh",background:D.bg}}>
