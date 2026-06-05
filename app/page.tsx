@@ -390,14 +390,22 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   useEffect(()=>{
     if(!userId)return;
     loadDailyTasksFromSupabase(userId).then(raw=>{
-      if(raw.length>0)setTasks((raw as DailyTask[]).map(t=>t.done?t:{...t,date:hoy}));
+      if(raw.length>0){
+        // Preserve done state exactly as saved, only update date for pending tasks from past days
+        const loaded=(raw as DailyTask[]).map(t=>({
+          ...t,
+          // Keep done tasks as-is, update date only for non-done tasks from today
+          date:t.done?t.date:hoy
+        }));
+        setTasks(loaded);
+      }
     }).catch(()=>{});
   },[userId]);
   useEffect(()=>{
-    if(tasks.length>0&&userId){
-      saveDailyTasksToSupabase(userId,tasks);
-      try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));}catch{}
-    }
+    if(!userId)return;
+    // Always save when tasks change (including when marked done)
+    saveDailyTasksToSupabase(userId,tasks);
+    try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));}catch{}
   },[tasks,userId]);
 
   const alertas=useMemo(()=>{
@@ -3352,12 +3360,13 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId} alertOnly={false}/>
             <KPISemanal clients={activeClients} transcripts={transcripts}/>
             <ForecastAlert clients={activeClients}/>
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <Recordatorios clients={activeClients} transcripts={transcripts}/>
 
-            <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId}/>
+
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
