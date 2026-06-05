@@ -2844,7 +2844,9 @@ export default function Home(){
         {/* Logo */}
         <div style={{padding:"20px 16px 16px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
           <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"4px"}}>
-            <img src={LOGO_B64} alt="Solarity" style={{height:"24px",width:"auto",filter:"brightness(10)"}}/>
+            <div style={{background:"white",borderRadius:"6px",padding:"3px 6px",display:"inline-flex",alignItems:"center"}}>
+              <img src={LOGO_B64} alt="Solarity" style={{height:"20px",width:"auto"}}/>
+            </div>
           </div>
           <div style={{fontSize:"10px",color:"rgba(255,255,255,0.3)",letterSpacing:"0.08em",textTransform:"uppercase",marginTop:"6px"}}>CRM de Ventas</div>
         </div>
