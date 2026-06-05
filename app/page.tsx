@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useUser, UserButton } from "@clerk/nextjs";
+import { saveClientsToSupabase, loadClientsFromSupabase, saveDailyTasksToSupabase, loadDailyTasksFromSupabase, saveRemindersToSupabase, loadRemindersFromSupabase } from "../lib/supabase-client";
 
 // --- Types --------------------------------------------------------------------
 type Stage = "Prospecto Pasivo" | "Prospecto Activo" | "Pipeline P2" | "Pipeline P1" | "Perdido";
@@ -273,7 +275,7 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
 }
 
 // --- Dashboard Panels (Sin Contacto + Mi Día) --------------------------------
-function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,onMarkContact,recentContacts,alertOnly}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;alertOnly?:boolean}){
+function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,onMarkContact,recentContacts,alertOnly,userId}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;alertOnly?:boolean;userId:string}){
   const [miDiaOpen,setMiDiaOpen]=useState(false);
   const [aiSuggestions,setAiSuggestions]=useState<Array<{text:string;clientName:string;urgencia:string}>>([]);
   const [loadingSugg,setLoadingSugg]=useState(false);
@@ -286,8 +288,18 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   const [alertTick,setAlertTick]=useState(0);
   const hoy=todayISO();
 
-  useEffect(()=>{try{const raw=localStorage.getItem(MI_DIA_KEY);if(raw)setTasks((JSON.parse(raw) as DailyTask[]).map(t=>t.done?t:{...t,date:hoy}));}catch{};},[]);
-  useEffect(()=>{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));},[tasks]);
+  useEffect(()=>{
+    if(!userId)return;
+    loadDailyTasksFromSupabase(userId).then(raw=>{
+      if(raw.length>0)setTasks((raw as DailyTask[]).map(t=>t.done?t:{...t,date:hoy}));
+    }).catch(()=>{});
+  },[userId]);
+  useEffect(()=>{
+    if(tasks.length>0&&userId){
+      saveDailyTasksToSupabase(userId,tasks);
+      try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));}catch{}
+    }
+  },[tasks,userId]);
 
   const alertas=useMemo(()=>{
     const recentC={...recentContacts,...localRecent};
@@ -2502,6 +2514,8 @@ function ChatTab({clients,transcripts}:{clients:ClientRecord[];transcripts:Trans
 
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
+  const {user,isLoaded}=useUser();
+  const userId=user?.id||"";
   const [clients,setClients]=useState<ClientRecord[]>([]);
   const [contacts,setContacts]=useState<ContactInfo[]>([]);
   const [transcripts,setTranscripts]=useState<TranscriptInfo[]>([]);
@@ -2517,6 +2531,7 @@ export default function Home(){
   const [extractTasksLoading,setExtractTasksLoading]=useState(false);
 
   const loadFromSheet=useCallback(async()=>{
+    if(!userId)return;
     setSheetStatus("loading");
     try{
       const [res1,res2,res3]=await Promise.all([
@@ -2530,8 +2545,9 @@ export default function Home(){
       if(res2.ok){const csv2=await res2.text();setContacts(parseContactsCSV(csv2));}
       if(res3.ok){const csv3=await res3.text();setTranscripts(parseTranscriptsCSV(csv3));}
       if(parsed.length>0){
-        const local=safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY));
-        // Build map with normalized key (remove accents, spaces, lowercase)
+        // Load local data from Supabase (user-specific)
+        const localRaw=await loadClientsFromSupabase(userId);
+        const local=safeParseClients(JSON.stringify(localRaw));
         const normalize=(s:string)=>s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
         const localMap=new Map(local.map(c=>[normalize(c.companyName),c]));
         const recentC=getRecentContacts();
@@ -2540,35 +2556,36 @@ export default function Home(){
           const recentKey=c.companyName.toLowerCase();
           const recent=recentC[recentKey]||"";
           const bestLastContact=recent>(e?.lastContactISO||"")?(recent):(e?.lastContactISO||"");
-          // Buscar meetings en backup por nombre empresa (más robusto)
-          const backupKey=`solar-crm:meetings:${c.companyName.toLowerCase().replace(/\s+/g,"-")}`;
           let localMeetings=e?.meetings||[];
-          try{
-            const backup=localStorage.getItem(backupKey);
-            if(backup){const bm=JSON.parse(backup) as Meeting[];if(bm.length>localMeetings.length)localMeetings=bm;}
-          }catch{}
           return e?{...c,id:e.id,aiTasks:e.aiTasks,meetings:localMeetings,lastContactISO:bestLastContact,createdAtISO:e.createdAtISO,stageHistory:e.stageHistory,nextStep:e.nextStep,aiStatus:e.aiStatus,aiStatusDate:e.aiStatusDate}:c;
         });
-        setClients(merged);localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(merged));setSheetStatus("ok");
-      }else{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("ok");}
-    }catch{setClients(safeParseClients(localStorage.getItem(LOCAL_STORAGE_KEY)));setSheetStatus("error");}
-  },[]);
+        setClients(merged);
+        await saveClientsToSupabase(userId,merged);
+        setSheetStatus("ok");
+      }else{
+        const localRaw=await loadClientsFromSupabase(userId);
+        setClients(safeParseClients(JSON.stringify(localRaw)));
+        setSheetStatus("ok");
+      }
+    }catch{
+      const localRaw=await loadClientsFromSupabase(userId);
+      setClients(safeParseClients(JSON.stringify(localRaw)));
+      setSheetStatus("error");
+    }
+  },[userId]);
 
-  useEffect(()=>{loadFromSheet();},[loadFromSheet]);
-  useEffect(()=>{if(clients.length>0){localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(clients));}},[clients]);
+  // Load data when user is ready
+  useEffect(()=>{if(isLoaded&&userId)loadFromSheet();},[isLoaded,userId,loadFromSheet]);
+  // Save to Supabase whenever clients change
+  useEffect(()=>{if(clients.length>0&&userId){saveClientsToSupabase(userId,clients);}},[clients,userId]);
 
-  function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
+  function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){
     setClients(prev=>{
       const updated=prev.map(c=>c.id===clientId?{...c,meetings,updatedAtISO:todayISO()}:c);
       try{
-        localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(updated));
-        // Backup meetings por empresa para sobrevivir syncs
-        const client=prev.find(c=>c.id===clientId);
-        if(client){
-          const backupKey=`solar-crm:meetings:${client.companyName.toLowerCase().replace(/\s+/g,"-")}`;
-          localStorage.setItem(backupKey,JSON.stringify(meetings.filter(m=>!m.fromDiio)));
-        }
+        if(userId)saveClientsToSupabase(userId,updated);
+
       }catch{}
       return updated;
     });
@@ -2588,8 +2605,8 @@ export default function Home(){
     saveRecentContact(key,todayISO());
     updateClientLastContact(clientId);
   }
-  function updateClientNote(clientId:string,note:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
-  function updateClientAIStatus(clientId:string,status:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c);try{localStorage.setItem(LOCAL_STORAGE_KEY,JSON.stringify(u));}catch{}return u;});}
+  function updateClientNote(clientId:string,note:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
+  function updateClientAIStatus(clientId:string,status:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
   function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||""});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
@@ -2749,7 +2766,7 @@ export default function Home(){
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <Recordatorios clients={activeClients} transcripts={transcripts}/>
             <ResumenSemanal clients={activeClients} transcripts={transcripts}/>
-            <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts}/>
+            <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
               <ProbChart clients={activeClients}/>
               <MonthlyChart clients={activeClients}/>
@@ -2773,5 +2790,6 @@ export default function Home(){
         <ClientForm draft={draft} setDraft={setDraft} onSave={saveClient} onCancel={()=>setModalOpen(false)} extractTasksLoading={extractTasksLoading} onExtract={extractTasksWithAI}/>
       </Modal>
     </div>
+      </>}
   );
 }
