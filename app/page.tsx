@@ -24,6 +24,7 @@ type ClientRecord = {
   aiTasks: ClientTask[]; meetings: Meeting[]; salesforce?: boolean; ingressDate?: string;
   createdAtISO: string; updatedAtISO: string;
   stageHistory?: StageChange[]; nextStep?: string; aiStatus?: string; aiStatusDate?: string;
+  lostReason?: string; lostCompetitor?: string;
 };
 type ContactInfo = { company: string; name: string; email: string; phone: string; };
 type TranscriptInfo = { company: string; date: string; transcript: string; };
@@ -195,6 +196,8 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     nextStep:(x as Record<string,unknown>).nextStep as string|undefined,
     aiStatus:(x as Record<string,unknown>).aiStatus as string|undefined,
     aiStatusDate:(x as Record<string,unknown>).aiStatusDate as string|undefined,
+    lostReason:(x as Record<string,unknown>).lostReason as string|undefined,
+    lostCompetitor:(x as Record<string,unknown>).lostCompetitor as string|undefined,
     aiTasks:Array.isArray((x as Record<string,unknown>).aiTasks)
       ?((x as Record<string,unknown>).aiTasks as Array<Record<string,unknown>>).map((t)=>({id:String(t.id||newId()),text:String(t.text||""),done:Boolean(t.done),followUp:t.followUp as FollowUp|undefined}))
       :[],
@@ -1957,10 +1960,20 @@ function PerdidosTab({clients}:{clients:ClientRecord[]}){
               <div style={{fontSize:"10px",color:D.ink3,marginTop:"2px"}}>{c.updatedAtISO}</div>
             </div>
           </div>
-          {c.nextAction&&(
+          {(c.lostReason||c.nextAction)&&(
             <div style={{background:D.white,borderRadius:"8px",padding:"8px 10px",fontSize:"12px",color:D.ink2,borderLeft:"2px solid #fca5a5"}}>
-              <div style={{fontSize:"10px",color:"#dc2626",marginBottom:"2px",fontWeight:500}}>Motivo</div>
-              {c.nextAction}
+              <div style={{fontSize:"10px",color:"#dc2626",marginBottom:"4px",fontWeight:500}}>Razón de pérdida</div>
+              {c.lostReason&&(
+                <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"3px"}}>
+                  {c.lostReason==="competencia"?"🏢 Perdido contra competencia":
+                   c.lostReason==="venta_directa"?"💰 Cliente quiere venta directa":
+                   c.lostReason==="sin_interes"?"👻 Sin interés":
+                   c.lostReason==="sin_factibilidad"?"⚡ Sin factibilidad técnica":
+                   "✏️ Otro motivo"}
+                  {c.lostReason==="competencia"&&c.lostCompetitor&&<span style={{color:"#dc2626",marginLeft:"6px"}}>→ {c.lostCompetitor}</span>}
+                </div>
+              )}
+              {c.nextAction&&<div style={{fontSize:"11px",color:D.ink3}}>{c.nextAction}</div>}
             </div>
           )}
         </div>
@@ -1970,8 +1983,9 @@ function PerdidosTab({clients}:{clients:ClientRecord[]}){
 }
 
 // --- Edit/Create Modal Form ---------------------------------------------------
-type ClientDraft=Omit<ClientRecord,"id"|"createdAtISO"|"updatedAtISO">;
-const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[],meetings:[],nextStep:""};
+type LostReason = "competencia"|"venta_directa"|"sin_interes"|"sin_factibilidad"|"otro";
+type ClientDraft=Omit<ClientRecord,"id"|"createdAtISO"|"updatedAtISO">&{lostReason?:LostReason;lostCompetitor?:string};
+const EMPTY_DRAFT:ClientDraft={companyName:"",contactName:"",stage:"Prospecto Activo",subStage:undefined,mwp:0,closeProbabilityPct:0,lastContactISO:"",nextAction:"",notes:"",stageDate:undefined,aiTasks:[],meetings:[],nextStep:"",lostReason:undefined,lostCompetitor:""};
 
 function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtract}:{draft:ClientDraft;setDraft:React.Dispatch<React.SetStateAction<ClientDraft>>;onSave:()=>void;onCancel:()=>void;extractTasksLoading:boolean;onExtract:()=>void}){
   const prob=draft.stage==="Pipeline P2"?5:draft.stage==="Pipeline P1"&&draft.subStage?SUBSTAGE_PROB[draft.subStage]:0;
@@ -1996,7 +2010,39 @@ function ClientForm({draft,setDraft,onSave,onCancel,extractTasksLoading,onExtrac
         {draft.subStage==="Presentación final"&&(
           <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Fecha presentación final <span style={{color:D.ink3,fontWeight:400}}>(para calcular cierre estimado)</span></div><input type="date" value={draft.stageDate||""} onChange={e=>setDraft(d=>({...d,stageDate:e.target.value||undefined}))} style={iStyle}/></div>
         )}
-        <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>{draft.stage==="Perdido"?"Motivo de pérdida":"Comentario / último movimiento"}</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder={draft.stage==="Perdido"?"¿Qué pasó? ¿Por qué se perdió?":"¿Qué pasó? ¿Qué falta hacer?"}/></div>
+        {draft.stage==="Perdido"?(
+          <div style={{gridColumn:"1/-1"}}>
+            <div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"8px"}}>Razón de pérdida</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"10px"}}>
+              {([
+                {v:"competencia",l:"🏢 Perdido contra competencia"},
+                {v:"venta_directa",l:"💰 Cliente quiere venta directa"},
+                {v:"sin_interes",l:"👻 Sin interés"},
+                {v:"sin_factibilidad",l:"⚡ Sin factibilidad técnica"},
+                {v:"otro",l:"✏️ Otro motivo"},
+              ] as {v:LostReason;l:string}[]).map(({v,l})=>(
+                <button key={v} type="button" onClick={()=>setDraft(d=>({...d,lostReason:v}))}
+                  style={{padding:"10px 12px",borderRadius:"10px",border:`2px solid ${draft.lostReason===v?D.accent:D.border}`,background:draft.lostReason===v?`${D.accent}10`:D.white,fontSize:"12px",cursor:"pointer",color:draft.lostReason===v?D.accent:D.ink2,fontWeight:draft.lostReason===v?600:400,textAlign:"left",transition:"all 0.15s"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            {draft.lostReason==="competencia"&&(
+              <div style={{marginBottom:"10px"}}>
+                <div style={{fontSize:"11px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>¿Qué empresa ganó?</div>
+                <input value={draft.lostCompetitor||""} onChange={e=>setDraft(d=>({...d,lostCompetitor:e.target.value}))} style={iStyle} placeholder="Ej: Enel X, Colbún, Sunroof..."/>
+              </div>
+            )}
+            {draft.lostReason==="otro"&&(
+              <div style={{marginBottom:"10px"}}>
+                <div style={{fontSize:"11px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Describe el motivo</div>
+                <input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder="Explica brevemente por qué se perdió"/>
+              </div>
+            )}
+          </div>
+        ):(
+          <div style={{gridColumn:"1/-1"}}><div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px"}}>Comentario / último movimiento</div><input value={draft.nextAction} onChange={e=>setDraft(d=>({...d,nextAction:e.target.value}))} style={iStyle} placeholder="¿Qué pasó? ¿Qué falta hacer?"/></div>
+        )}
         <div style={{gridColumn:"1/-1"}}>
           <div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"5px",display:"flex",alignItems:"center",gap:"6px"}}>
             Próximo paso concreto
@@ -3157,13 +3203,20 @@ export default function Home(){
   function updateClientNote(clientId:string,note:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,nextAction:note,updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
   function updateClientAIStatus(clientId:string,status:string){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiStatus:status,aiStatusDate:todayISO(),updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
   function openCreate(){setEditingId(null);setExtractTasksLoading(false);setDraft({...EMPTY_DRAFT,lastContactISO:todayISO()});setModalOpen(true);}
-  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||""});setModalOpen(true);}
+  function openEdit(id:string){const c=clients.find(x=>x.id===id);if(!c)return;setEditingId(id);setDraft({companyName:c.companyName,contactName:c.contactName,stage:c.stage,subStage:c.subStage,mwp:c.mwp,closeProbabilityPct:c.closeProbabilityPct,lastContactISO:c.lastContactISO,nextAction:c.nextAction,notes:c.notes,stageDate:c.stageDate,aiTasks:c.aiTasks,meetings:c.meetings||[],nextStep:c.nextStep||"",lostReason:(c.lostReason as LostReason)||(c.nextAction?.includes("competencia")?"competencia":c.nextAction?.includes("venta directa")?"venta_directa":c.nextAction?.includes("interés")?"sin_interes":c.nextAction?.includes("factibilidad")?"sin_factibilidad":undefined),lostCompetitor:c.lostCompetitor||""});setModalOpen(true);}
   function removeClient(id:string){const c=clients.find(x=>x.id===id);if(!c||!window.confirm(`¿Eliminar "${c.companyName}"?`))return;setClients(prev=>prev.filter(x=>x.id!==id));}
   function saveClient(){
     if(!draft.companyName.trim()){window.alert("Ingresa el nombre de la empresa.");return;}
     const now=todayISO();
     let prob=0;if(draft.stage==="Pipeline P2")prob=5;else if(draft.stage==="Pipeline P1"&&draft.subStage)prob=SUBSTAGE_PROB[draft.subStage];
-    const n={...draft,closeProbabilityPct:prob,subStage:(draft.stage==="Pipeline P1"||draft.stage==="Pipeline P2")?draft.subStage:undefined};
+    const n={...draft,closeProbabilityPct:prob,subStage:(draft.stage==="Pipeline P1"||draft.stage==="Pipeline P2")?draft.subStage:undefined,
+      lostReason:draft.stage==="Perdido"?draft.lostReason:undefined,
+      lostCompetitor:draft.stage==="Perdido"&&draft.lostReason==="competencia"?draft.lostCompetitor:undefined,
+      nextAction:draft.stage==="Perdido"&&draft.lostReason&&draft.lostReason!=="otro"?
+        (draft.lostReason==="competencia"?`Perdido contra competencia${draft.lostCompetitor?" ("+draft.lostCompetitor+")":""}`:
+         draft.lostReason==="venta_directa"?"Cliente quiere venta directa":
+         draft.lostReason==="sin_interes"?"Sin interés":
+         "Sin factibilidad técnica"):draft.nextAction};
     if(!editingId){
       const newHistory:StageChange[]=[{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}];
       setClients(prev=>[{id:newId(),...n,createdAtISO:now,updatedAtISO:now,stageHistory:newHistory},...prev]);
