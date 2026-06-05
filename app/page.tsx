@@ -53,25 +53,46 @@ const P1_SUBSTAGE_ORDER: SubStage[] = [
 ];
 const STAGES: Stage[] = ["Prospecto Pasivo","Prospecto Activo","Pipeline P2","Pipeline P1","Perdido"];
 const D = {
-  bg:"#F5F4F0", white:"#FFFFFF", ink:"#111827", ink2:"#374151", ink3:"#9CA3AF",
-  border:"#E5E7EB", accent:"#E8500A", accentY:"#F5B800",
-  accentLight:"#FFF4EF", accentBorder:"#FBD0BC",
-  signedBg:"#F0FDF4", signedBorder:"#86EFAC",
-  alarmBg:"#FEF2F2", alarmBorder:"#FECACA",
-  lostBg:"#FEF2F2", lostBorder:"#FECACA",
-  shadow:"0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
-  shadowMd:"0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
-  shadowLg:"0 20px 60px rgba(0,0,0,0.12)",
+  bg:"#F7F6F3", white:"#FFFFFF", ink:"#0D0D0D", ink2:"#404040", ink3:"#A0A0A0",
+  border:"#E8E6E1", accent:"#E8500A", accentY:"#F5B800",
+  accentLight:"#FFF3EE", accentBorder:"#FAC8AE",
+  signedBg:"#F0FDF4", signedBorder:"#6EE7A0",
+  alarmBg:"#FFF5F5", alarmBorder:"#FECACA",
+  lostBg:"#FFF5F5", lostBorder:"#FECACA",
+  card:"#FFFFFF",
+  sidebar:"#111111",
+  sidebarText:"#E0E0E0",
+  sidebarActive:"#E8500A",
+  shadow:"0 1px 2px rgba(0,0,0,0.06)",
+  shadowMd:"0 4px 16px rgba(0,0,0,0.08)",
+  shadowLg:"0 20px 60px rgba(0,0,0,0.14)",
 };
 const fontStyle = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
-  *{font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
-  body{background:#F5F4F0;}
-  ::-webkit-scrollbar{width:5px;height:5px;}
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&family=DM+Mono:wght@400;500&display=swap');
+  *{font-family:'DM Sans',sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;}
+  body{background:#F7F6F3;}
+  .mono{font-family:'DM Mono',monospace;}
+  ::-webkit-scrollbar{width:4px;height:4px;}
   ::-webkit-scrollbar-track{background:transparent;}
-  ::-webkit-scrollbar-thumb{background:#D1D5DB;border-radius:10px;}
-  @keyframes fadeIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
-  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}`;
+  ::-webkit-scrollbar-thumb{background:#D1CBC0;border-radius:10px;}
+  ::-webkit-scrollbar-thumb:hover{background:#B0A898;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes slideIn{from{opacity:0;transform:translateX(-8px);}to{opacity:1;transform:translateX(0);}}
+  @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.5;}}
+  .card-hover{transition:box-shadow 0.2s ease,transform 0.2s ease;}
+  .card-hover:hover{box-shadow:0 8px 32px rgba(0,0,0,0.1)!important;transform:translateY(-1px);}
+  .tab-btn{transition:all 0.15s ease;}
+  .sidebar-item{transition:all 0.15s ease;border-radius:8px;}
+  .sidebar-item:hover{background:rgba(255,255,255,0.08);}
+  .sidebar-item.active{background:rgba(232,80,10,0.15);color:#E8500A;}
+  .btn-primary{transition:all 0.15s ease;}
+  .btn-primary:hover{filter:brightness(1.08);transform:translateY(-1px);}
+  .btn-primary:active{transform:translateY(0);}
+  .metric-card{transition:all 0.2s ease;}
+  .metric-card:hover{box-shadow:0 8px 24px rgba(0,0,0,0.1)!important;}
+  .stage-badge{font-size:10px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;padding:3px 8px;border-radius:20px;}
+`;
 const iStyle: React.CSSProperties = {width:"100%",padding:"9px 12px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"13px",color:D.ink,outline:"none",boxSizing:"border-box",transition:"border-color 0.15s",boxShadow:D.shadow};
 
 // --- Utils --------------------------------------------------------------------
@@ -1208,9 +1229,7 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
 
   return(
     <>
-    <div style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"14px",transition:"box-shadow 0.15s"}}
-      onMouseEnter={e=>(e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.07)")}
-      onMouseLeave={e=>(e.currentTarget.style.boxShadow="none")}>
+    <div className="card-hover" style={{background:isSigned?D.signedBg:D.white,border:`1px solid ${isSigned?D.signedBorder:D.border}`,borderRadius:"14px",padding:"16px",boxShadow:D.shadow}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:"8px",marginBottom:"8px"}}>
         <div style={{minWidth:0}}>
           <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"5px"}}>
@@ -2812,43 +2831,82 @@ export default function Home(){
   );
   if(!userConfig)return <ConfigScreen userId={userId} onSave={cfg=>{setUserConfig(cfg);}}/>;
 
+  const tabIcons:Record<string,string> = {
+    dashboard:"◈",pipeline1:"▸",pipeline2:"▹",prospectos:"◎",perdidos:"✕",semana:"◷",chat:"✦"
+  };
+
   return(
-    <div style={{minHeight:"100dvh",background:D.bg}}>
+    <div style={{minHeight:"100dvh",background:D.bg,display:"flex"}}>
       <style>{fontStyle}</style>
-      <header style={{background:D.white,borderBottom:`1px solid ${D.border}`,position:"sticky",top:0,zIndex:20,boxShadow:D.shadow}}>
-        <div style={{maxWidth:"1400px",margin:"0 auto",padding:"0 2rem"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0.875rem 0",gap:"16px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"16px"}}>
-              <img src={LOGO_B64} alt="Solarity" style={{height:"32px",width:"auto"}}/>
-              <div style={{width:"1px",height:"20px",background:D.border}}/>
-              <div>
-                <div style={{fontSize:"14px",fontWeight:600,color:D.ink,letterSpacing:"-0.01em"}}>CRM de Ventas · Antonia Vial</div>
-                <div style={{fontSize:"10px",color:D.ink3,letterSpacing:"0.06em",textTransform:"uppercase",marginTop:"1px"}}>Solarity · Meta 2026: {ANNUAL_GOAL_MWP} MWp</div>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-              <button onClick={exportToExcel} style={{padding:"7px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:D.ink2,fontWeight:500,display:"flex",alignItems:"center",gap:"5px",boxShadow:D.shadow}}>
-                <span>↓</span> Excel
-              </button>
-              <button onClick={loadFromSheet} disabled={sheetStatus==="loading"} style={{padding:"7px 14px",borderRadius:"8px",border:`1px solid ${D.border}`,background:D.white,fontSize:"12px",cursor:"pointer",color:sheetStatus==="ok"?"#16a34a":sheetStatus==="error"?"#dc2626":D.ink2,fontWeight:500,boxShadow:D.shadow}}>
-                {sheetStatus==="loading"?"⏳ Sync…":sheetStatus==="ok"?"✓ Sincronizado":sheetStatus==="error"?"⚠ Error":"↻ Cargar"}
-              </button>
-              <button onClick={openCreate} style={{padding:"7px 16px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:D.white,fontWeight:600,boxShadow:`0 2px 8px ${D.accent}44`,display:"flex",alignItems:"center",gap:"5px"}}>
-                + Cliente
-              </button>
-            </div>
+
+      {/* SIDEBAR */}
+      <aside style={{width:"220px",minHeight:"100dvh",background:D.sidebar,display:"flex",flexDirection:"column",position:"fixed",left:0,top:0,bottom:0,zIndex:30,flexShrink:0}}>
+        {/* Logo */}
+        <div style={{padding:"20px 16px 16px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"4px"}}>
+            <img src={LOGO_B64} alt="Solarity" style={{height:"24px",width:"auto",filter:"brightness(10)"}}/>
           </div>
-          <div style={{display:"flex",gap:"0",borderTop:`1px solid ${D.border}`}}>
-            {tabs.map(([tab,label])=>(
-              <button key={tab} onClick={()=>setActiveTab(tab)} style={{padding:"0.7rem 1.25rem",border:"none",background:"none",cursor:"pointer",fontSize:"12px",fontWeight:activeTab===tab?600:400,color:activeTab===tab?(tab==="perdidos"?"#dc2626":D.accent):D.ink3,borderBottom:activeTab===tab?`2px solid ${tab==="perdidos"?"#dc2626":D.accent}`:"2px solid transparent",transition:"all 0.15s",letterSpacing:"0.01em"}}>
-                {label}
-              </button>
-            ))}
+          <div style={{fontSize:"10px",color:"rgba(255,255,255,0.3)",letterSpacing:"0.08em",textTransform:"uppercase",marginTop:"6px"}}>CRM de Ventas</div>
+        </div>
+
+        {/* User */}
+        <div style={{padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+          <div style={{fontSize:"12px",fontWeight:600,color:"rgba(255,255,255,0.85)",marginBottom:"2px"}}>{user?.firstName||"Antonia"} {user?.lastName||"Vial"}</div>
+          <div style={{fontSize:"10px",color:"rgba(255,255,255,0.35)"}}>Meta 2026: {ANNUAL_GOAL_MWP} MWp</div>
+          <div style={{marginTop:"8px",height:"3px",background:"rgba(255,255,255,0.08)",borderRadius:"2px",overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${Math.min((metrics.mwpFirmado/ANNUAL_GOAL_MWP)*100,100)}%`,background:D.accent,borderRadius:"2px",transition:"width 0.5s ease"}}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:"4px"}}>
+            <span style={{fontSize:"9px",color:"rgba(255,255,255,0.3)"}}>{metrics.mwpFirmado.toFixed(1)} MWp firmado</span>
+            <span style={{fontSize:"9px",color:D.accent,fontWeight:600}}>{Math.round((metrics.mwpFirmado/ANNUAL_GOAL_MWP)*100)}%</span>
           </div>
         </div>
-      </header>
 
-      <div style={{maxWidth:"1400px",margin:"0 auto",padding:"1.75rem 2rem"}}>
+        {/* Nav */}
+        <nav style={{flex:1,padding:"12px 10px",display:"flex",flexDirection:"column",gap:"2px"}}>
+          {tabs.map(([tab,label])=>(
+            <button key={tab} onClick={()=>setActiveTab(tab)} className={`sidebar-item${activeTab===tab?" active":""}`}
+              style={{width:"100%",display:"flex",alignItems:"center",gap:"10px",padding:"9px 10px",border:"none",background:activeTab===tab?"rgba(232,80,10,0.15)":"transparent",cursor:"pointer",textAlign:"left",color:activeTab===tab?D.accent:"rgba(255,255,255,0.5)",fontSize:"13px",fontWeight:activeTab===tab?600:400}}>
+              <span style={{fontSize:"14px",width:"18px",textAlign:"center",flexShrink:0}}>{tabIcons[tab]||"·"}</span>
+              <span>{label}</span>
+              {tab==="perdidos"&&perdidosCount>0&&<span style={{marginLeft:"auto",fontSize:"10px",background:"#dc2626",color:"white",padding:"1px 6px",borderRadius:"10px",fontWeight:700}}>{perdidosCount}</span>}
+            </button>
+          ))}
+        </nav>
+
+        {/* Bottom actions */}
+        <div style={{padding:"12px 10px",borderTop:"1px solid rgba(255,255,255,0.06)",display:"flex",flexDirection:"column",gap:"6px"}}>
+          <button onClick={loadFromSheet} disabled={sheetStatus==="loading"}
+            style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:sheetStatus==="ok"?"#4ade80":sheetStatus==="error"?"#f87171":"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
+            <span>{sheetStatus==="loading"?"⏳":sheetStatus==="ok"?"●":"↻"}</span>
+            {sheetStatus==="loading"?"Sincronizando...":sheetStatus==="ok"?"Sincronizado":sheetStatus==="error"?"Error al cargar":"Cargar Sheet"}
+          </button>
+          <button onClick={exportToExcel}
+            style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
+            <span>↓</span> Exportar Excel
+          </button>
+          <button onClick={openCreate} className="btn-primary"
+            style={{width:"100%",padding:"9px 10px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:"white",fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",boxShadow:`0 2px 12px ${D.accent}55`}}>
+            + Nuevo Cliente
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main style={{marginLeft:"220px",flex:1,minHeight:"100dvh",display:"flex",flexDirection:"column"}}>
+        {/* Top bar */}
+        <div style={{background:D.white,borderBottom:`1px solid ${D.border}`,padding:"0 2rem",height:"52px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:20,boxShadow:"0 1px 0 rgba(0,0,0,0.04)"}}>
+          <div>
+            <span style={{fontSize:"14px",fontWeight:600,color:D.ink}}>{tabs.find(([t])=>t===activeTab)?.[1]||"Dashboard"}</span>
+            {activeTab==="dashboard"&&<span style={{fontSize:"12px",color:D.ink3,marginLeft:"8px"}}>Pipeline total: {metrics.mwpTotal.toFixed(1)} MWp</span>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+            <UserButton afterSignOutUrl="/sign-in"/>
+          </div>
+        </div>
+
+        {/* Page content */}
+        <div style={{padding:"2rem",flex:1}}>
         {activeTab==="dashboard"&&(
           <div style={{display:"flex",flexDirection:"column",gap:"1.25rem",animation:"fadeIn 0.2s ease"}}>
             <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:"12px"}}>
@@ -2859,10 +2917,10 @@ export default function Home(){
                 {l:"Probable cierre 2026",v:metrics.mwpProb2026.toFixed(2),u:"ponderado"},
                 {l:"MWp firmado",v:metrics.mwpFirmado.toFixed(2),u:metrics.mwpFirmado>=ANNUAL_GOAL_MWP?"🎉 Meta cumplida":"cerrados"},
               ].map((m,i)=>(
-                <div key={i} style={{background:D.white,border:`1px solid ${(m as {accent?:boolean;sf?:boolean}).accent?D.accentBorder:(m as {sf?:boolean}).sf?"#BFDBFE":D.border}`,borderRadius:"12px",padding:"1.1rem 1.25rem",boxShadow:D.shadow,borderTop:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:(m as {sf?:boolean}).sf?"3px solid #3B82F6":"3px solid transparent"}}>
-                  <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:"8px",fontWeight:500}}>{m.l}</div>
-                  <div style={{fontSize:"24px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:(m as {sf?:boolean}).sf?"#2563EB":D.ink,fontFamily:"'DM Serif Display',serif",letterSpacing:"-0.02em"}}>{m.v}</div>
-                  <div style={{fontSize:"11px",color:D.ink3,marginTop:"4px"}}>{m.u}</div>
+                <div key={i} className="metric-card" style={{background:D.white,border:`1px solid ${(m as {accent?:boolean;sf?:boolean}).accent?D.accentBorder:(m as {sf?:boolean}).sf?"#BFDBFE":D.border}`,borderRadius:"14px",padding:"1.25rem",boxShadow:D.shadow,borderLeft:(m as {accent?:boolean}).accent?`3px solid ${D.accent}`:(m as {sf?:boolean}).sf?"3px solid #3B82F6":"3px solid transparent"}}>
+                  <div style={{fontSize:"10px",color:D.ink3,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"10px",fontWeight:600}}>{m.l}</div>
+                  <div style={{fontSize:"28px",fontWeight:700,color:(m as {accent?:boolean}).accent?D.accent:(m as {sf?:boolean}).sf?"#2563EB":D.ink,fontFamily:"'DM Serif Display',serif",letterSpacing:"-0.03em",lineHeight:1}}>{m.v}</div>
+                  <div style={{fontSize:"11px",color:D.ink3,marginTop:"6px",fontWeight:400}}>{m.u}</div>
                 </div>
               ))}
             </div>
@@ -2900,5 +2958,6 @@ export default function Home(){
         <ClientForm draft={draft} setDraft={setDraft} onSave={saveClient} onCancel={()=>setModalOpen(false)} extractTasksLoading={extractTasksLoading} onExtract={extractTasksWithAI}/>
       </Modal>
     </div>
+  </main>
   );
 }
