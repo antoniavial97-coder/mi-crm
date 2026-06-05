@@ -205,6 +205,84 @@ function safeParseClients(raw:string|null):ClientRecord[]{
     updatedAtISO:typeof x.updatedAtISO==="string"?x.updatedAtISO:todayISO(),
   }));}catch{return [];}}
 
+// --- Global Search -----------------------------------------------------------
+function GlobalSearch({clients,onSelectClient}:{clients:ClientRecord[];onSelectClient:(id:string)=>void}){
+  const [query,setQuery]=useState("");
+  const [open,setOpen]=useState(false);
+  const ref=useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{
+    const fn=(e:MouseEvent)=>{if(ref.current&&!ref.current.contains(e.target as Node))setOpen(false);};
+    document.addEventListener("mousedown",fn);
+    return()=>document.removeEventListener("mousedown",fn);
+  },[]);
+
+  useEffect(()=>{
+    const fn=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==="k"){e.preventDefault();setOpen(true);}if(e.key==="Escape")setOpen(false);};
+    window.addEventListener("keydown",fn);
+    return()=>window.removeEventListener("keydown",fn);
+  },[]);
+
+  const results=useMemo(()=>{
+    if(!query.trim()||query.length<2)return[];
+    const q=query.toLowerCase();
+    const matches:Array<{client:ClientRecord;match:string;score:number}>=[];
+    for(const c of clients){
+      let score=0;let match="";
+      if(c.companyName.toLowerCase().includes(q)){score+=10;match=c.companyName;}
+      else if(c.contactName.toLowerCase().includes(q)){score+=8;match=c.contactName;}
+      else if(c.nextAction?.toLowerCase().includes(q)){score+=5;match=c.nextAction.substring(0,60)+"...";}
+      else if(c.notes?.toLowerCase().includes(q)){score+=4;match=c.notes.substring(0,60)+"...";}
+      else{
+        for(const m of (c.meetings||[])){
+          if(m.notes?.toLowerCase().includes(q)||m.subject?.toLowerCase().includes(q)){
+            score+=6;match=(m.subject||m.notes||"").substring(0,60)+"...";break;
+          }
+        }
+      }
+      if(score>0)matches.push({client:c,match,score});
+    }
+    return matches.sort((a,b)=>b.score-a.score).slice(0,8);
+  },[query,clients]);
+
+  return(
+    <div ref={ref} style={{position:"relative",flex:1,maxWidth:"400px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:"8px",background:"#1E1E1E",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"10px",padding:"7px 12px",cursor:"text"}} onClick={()=>setOpen(true)}>
+        <span style={{color:"rgba(255,255,255,0.3)",fontSize:"13px"}}>🔍</span>
+        <input
+          value={query}
+          onChange={e=>{setQuery(e.target.value);setOpen(true);}}
+          onFocus={()=>setOpen(true)}
+          placeholder="Buscar cliente, correo, nota... (⌘K)"
+          style={{background:"none",border:"none",outline:"none",fontSize:"12px",color:"rgba(255,255,255,0.7)",width:"100%",fontFamily:"inherit"}}
+        />
+        {query&&<button onClick={()=>{setQuery("");setOpen(false);}} style={{background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.3)",fontSize:"14px",padding:0}}>×</button>}
+      </div>
+      {open&&results.length>0&&(
+        <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,right:0,background:D.white,border:`1px solid ${D.border}`,borderRadius:"12px",boxShadow:D.shadowLg,zIndex:100,overflow:"hidden"}}>
+          {results.map(({client,match},i)=>(
+            <div key={i} onClick={()=>{onSelectClient(client.id);setOpen(false);setQuery("");}}
+              style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 14px",cursor:"pointer",borderBottom:i<results.length-1?`1px solid ${D.border}`:"none"}}
+              onMouseEnter={e=>(e.currentTarget.style.background=D.bg)}
+              onMouseLeave={e=>(e.currentTarget.style.background="white")}>
+              <div style={{width:"32px",height:"32px",borderRadius:"8px",background:`${D.accent}15`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:700,color:D.accent,flexShrink:0}}>
+                {client.companyName[0]}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.companyName}</div>
+                <div style={{fontSize:"11px",color:D.ink3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{match}</div>
+              </div>
+              <div style={{flexShrink:0}}>
+                <span style={{fontSize:"10px",fontWeight:500,color:client.stage==="Pipeline P1"?D.accent:D.ink3,background:client.stage==="Pipeline P1"?`${D.accent}12`:D.bg,padding:"2px 7px",borderRadius:"10px"}}>{client.subStage||client.stage}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Modal --------------------------------------------------------------------
 function Modal({open,title,children,onClose,wide}:{open:boolean;title:string;children:React.ReactNode;onClose:()=>void;wide?:boolean}){
   const ref=useRef<HTMLDivElement|null>(null);
@@ -1286,7 +1364,10 @@ function ClientCard({client,contacts,transcripts,onEdit,onDelete,onUpdateMeeting
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px",marginBottom:"8px"}}>
         <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>MWp</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.mwp.toFixed(2)}</div></div>
-        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px"}}><div style={{fontSize:"10px",color:D.ink3}}>Prob.</div><div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div></div>
+        <div style={{background:D.bg,borderRadius:"8px",padding:"7px 9px",cursor:"pointer"}} onClick={()=>onEdit(client.id)} title="Click para editar probabilidad">
+          <div style={{fontSize:"10px",color:D.ink3,display:"flex",justifyContent:"space-between"}}>Prob. <span style={{color:D.accent}}>✎</span></div>
+          <div style={{fontSize:"13px",fontWeight:600,color:D.ink}}>{client.closeProbabilityPct}%</div>
+        </div>
       </div>
       {/* Status IA */}
       <div style={{background:D.bg,borderRadius:"8px",padding:"8px 10px",borderLeft:`2px solid ${client.aiStatus?"#7C3AED33":D.border}`}}>
@@ -2842,6 +2923,124 @@ function PerfilTab({user}:{user:ReturnType<typeof useUser>["user"]}){
   );
 }
 
+// --- KPI Semanal -------------------------------------------------------------
+function KPISemanal({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+  const hoy=new Date();
+  const lunes=new Date(hoy);
+  lunes.setDate(hoy.getDate()-((hoy.getDay()+6)%7));
+  const lunesISO=lunes.toISOString().slice(0,10);
+  const lunesAnterior=new Date(lunes);
+  lunesAnterior.setDate(lunes.getDate()-7);
+  const lunesAnteriorISO=lunesAnterior.toISOString().slice(0,10);
+  const domingoAnteriorISO=new Date(lunes.getTime()-1).toISOString().slice(0,10);
+
+  const contarActividad=(desde:string,hasta:string)=>{
+    let reuniones=0,correos=0,llamados=0,tareas=0;
+    for(const c of clients){
+      for(const m of (c.meetings||[])){
+        if(m.date>=desde&&m.date<=hasta&&!m.fromDiio){
+          if(m.type==="reunion")reuniones++;
+          else if(m.type==="correo")correos++;
+          else if(m.type==="llamado")llamados++;
+          else if(m.type==="tarea")tareas++;
+        }
+      }
+    }
+    // Also count Diio transcripts
+    for(const t of transcripts){
+      let fecha=t.date;
+      if(fecha?.includes("/")){const p=fecha.split("/");if(p.length===3&&p[2].length===4)fecha=`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;}
+      if(fecha>=desde&&fecha<=hasta)reuniones++;
+    }
+    return{reuniones,correos,llamados,tareas,total:reuniones+correos+llamados+tareas};
+  };
+
+  const semanaActual=contarActividad(lunesISO,hoy.toISOString().slice(0,10));
+  const semanaAnterior=contarActividad(lunesAnteriorISO,domingoAnteriorISO);
+
+  const diff=(actual:number,anterior:number)=>{
+    if(anterior===0)return actual>0?"+"+actual:"—";
+    const d=actual-anterior;
+    return d>0?"+"+d:String(d);
+  };
+  const diffColor=(actual:number,anterior:number)=>actual>=anterior?"#16a34a":"#dc2626";
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.25rem"}}>
+      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Actividad esta semana</div>
+      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Desde el lunes · vs semana pasada</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"10px"}}>
+        {[
+          {l:"Reuniones",actual:semanaActual.reuniones,ant:semanaAnterior.reuniones,icon:"📅",color:"#E8500A"},
+          {l:"Correos",actual:semanaActual.correos,ant:semanaAnterior.correos,icon:"✉️",color:"#0891B2"},
+          {l:"Llamados",actual:semanaActual.llamados,ant:semanaAnterior.llamados,icon:"📞",color:"#7C3AED"},
+          {l:"Tareas",actual:semanaActual.tareas,ant:semanaAnterior.tareas,icon:"✓",color:"#16a34a"},
+        ].map(({l,actual,ant,icon,color})=>(
+          <div key={l} style={{background:D.bg,borderRadius:"10px",padding:"12px",textAlign:"center"}}>
+            <div style={{fontSize:"18px",marginBottom:"4px"}}>{icon}</div>
+            <div style={{fontSize:"24px",fontWeight:700,color,fontFamily:"'DM Serif Display',serif"}}>{actual}</div>
+            <div style={{fontSize:"10px",color:D.ink3,marginBottom:"4px"}}>{l}</div>
+            <div style={{fontSize:"10px",fontWeight:600,color:diffColor(actual,ant)}}>{diff(actual,ant)} vs sem. ant.</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// --- Forecast Alert ----------------------------------------------------------
+function ForecastAlert({clients}:{clients:ClientRecord[]}){
+  const hoy=new Date();
+  const diciembre=new Date(2026,11,31);
+  const diasRestantes=Math.floor((diciembre.getTime()-hoy.getTime())/(1000*60*60*24));
+  const mesesRestantes=Math.round(diasRestantes/30);
+
+  const mwpFirmado=clients.filter(c=>c.subStage==="Contrato firmado").reduce((s,c)=>s+(c.mwp||0),0);
+  const mwpProb=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado").reduce((s,c)=>s+(c.mwp||0)*(c.closeProbabilityPct/100),0);
+  const mwpTotal=mwpFirmado+mwpProb;
+  const faltaMeta=Math.max(ANNUAL_GOAL_MWP-mwpFirmado,0);
+  const pctCumplido=Math.round((mwpFirmado/ANNUAL_GOAL_MWP)*100);
+  const onTrack=mwpTotal>=ANNUAL_GOAL_MWP;
+  const gap=ANNUAL_GOAL_MWP-mwpTotal;
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${onTrack?"#86EFAC":"#FED7AA"}`,borderRadius:"16px",padding:"1.25rem"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1rem"}}>
+        <div>
+          <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px",display:"flex",alignItems:"center",gap:"8px"}}>
+            {onTrack?"🎯 Forecast: En camino":"⚠️ Forecast: Necesitas acelerar"}
+            <span style={{fontSize:"11px",fontWeight:500,color:onTrack?"#16a34a":"#C2410C",background:onTrack?"#DCFCE7":"#FEF3C7",padding:"2px 8px",borderRadius:"10px"}}>
+              {pctCumplido}% completado
+            </span>
+          </div>
+          <div style={{fontSize:"11px",color:D.ink3}}>{diasRestantes} días para diciembre · Meta: {ANNUAL_GOAL_MWP} MWp</div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"10px",marginBottom:"1rem"}}>
+        {[
+          {l:"Firmado",v:mwpFirmado.toFixed(2),u:"MWp",color:"#16a34a"},
+          {l:"Probable",v:mwpProb.toFixed(2),u:"MWp",color:"#F59E0B"},
+          {l:{true:"Superávit",false:"Déficit"}[String(onTrack) as "true"|"false"],v:Math.abs(gap).toFixed(2),u:"MWp",color:onTrack?"#16a34a":"#DC2626"},
+        ].map(({l,v,u,color})=>(
+          <div key={l} style={{background:D.bg,borderRadius:"10px",padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontSize:"10px",color:D.ink3,marginBottom:"4px",textTransform:"uppercase",letterSpacing:"0.05em"}}>{l}</div>
+            <div style={{fontSize:"20px",fontWeight:700,color,fontFamily:"'DM Serif Display',serif"}}>{v}</div>
+            <div style={{fontSize:"10px",color:D.ink3}}>{u}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{height:"8px",background:D.border,borderRadius:"4px",overflow:"hidden"}}>
+        <div style={{height:"100%",borderRadius:"4px",background:`linear-gradient(90deg,#16a34a,${onTrack?"#22c55e":"#F59E0B"})`,width:`${Math.min(pctCumplido,100)}%`,transition:"width 0.5s ease"}}/>
+      </div>
+      {!onTrack&&(
+        <div style={{marginTop:"10px",fontSize:"11px",color:"#C2410C",background:"#FEF3C7",padding:"8px 12px",borderRadius:"8px"}}>
+          Necesitas {gap.toFixed(1)} MWp más en probabilidad ponderada para llegar a la meta. Enfócate en avanzar los proyectos de Presentación Final.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const {user,isLoaded}=useUser();
@@ -3119,13 +3318,11 @@ export default function Home(){
       {/* MAIN CONTENT */}
       <main style={{marginLeft:"220px",flex:1,minHeight:"100dvh",display:"flex",flexDirection:"column"}}>
         {/* Top bar */}
-        <div style={{background:D.white,borderBottom:`1px solid ${D.border}`,padding:"0 2rem",height:"52px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:20,boxShadow:"0 1px 0 rgba(0,0,0,0.04)"}}>
-          <div>
-            <span style={{fontSize:"14px",fontWeight:600,color:D.ink}}>{tabs.find(([t])=>t===activeTab)?.[1]||"Dashboard"}</span>
-            {activeTab==="dashboard"&&<span style={{fontSize:"12px",color:D.ink3,marginLeft:"8px"}}>Pipeline total: {metrics.mwpTotal.toFixed(1)} MWp</span>}
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-            <UserButton/>
+        <div style={{background:D.sidebar,padding:"0 1.5rem",height:"52px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:20,gap:"16px"}}>
+          <span style={{fontSize:"13px",fontWeight:600,color:"rgba(255,255,255,0.5)",flexShrink:0}}>{tabs.find(([t])=>t===activeTab)?.[1]||"Dashboard"}</span>
+          <GlobalSearch clients={activeClients} onSelectClient={(id)=>{openEdit(id);}}/>
+          <div style={{display:"flex",alignItems:"center",gap:"10px",flexShrink:0}}>
+            <UserButton appearance={{elements:{avatarBox:{width:"32px",height:"32px"}}}}/>
           </div>
         </div>
 
@@ -3155,6 +3352,8 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <KPISemanal clients={activeClients} transcripts={transcripts}/>
+            <ForecastAlert clients={activeClients}/>
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <Recordatorios clients={activeClients} transcripts={transcripts}/>
 
