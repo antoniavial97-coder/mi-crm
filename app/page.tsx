@@ -1727,7 +1727,7 @@ function Pipeline1Tab({clients,contacts,transcripts,onEdit,onDelete,onUpdateTask
         ))}
       </div>
       <FiltrosPipeline subStages={P1_SUBSTAGE_ORDER} onFilter={setFiltro}/>
-      <DashboardPanels clients={clients} transcripts={transcripts} onEdit={onEdit} onUpdateMeetings={onUpdateMeetings} onUpdateLastContact={onUpdateLastContact} onMarkContact={onMarkContact} recentContacts={recentContacts} alertOnly/>
+      <DashboardPanels clients={clients} transcripts={transcripts} onEdit={onEdit} onUpdateMeetings={onUpdateMeetings} onUpdateLastContact={onUpdateLastContact} onMarkContact={onMarkContact} recentContacts={recentContacts} alertOnly userId=""/>
       
       <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
         {P1_SUBSTAGE_ORDER.map(sub=>{
