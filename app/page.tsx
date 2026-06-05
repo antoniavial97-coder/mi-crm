@@ -2256,7 +2256,7 @@ function ProximasReuniones({clients,onUpdateMeetings}:{clients:ClientRecord[];on
               value={completionNotes}
               onChange={e=>setCompletionNotes(e.target.value)}
               rows={6}
-              placeholder="Escribí lo que pasó en la reunión, acuerdos, próximos pasos... o pegá la transcripción de Diio"
+              placeholder="Escribí lo que pasó en la reunión, acuerdos, próximos pasos... o pega la transcripción de Diio"
               style={{...iStyle,resize:"vertical",lineHeight:1.5,fontFamily:"inherit"}}
               autoFocus
             />
@@ -2545,7 +2545,7 @@ function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void
 
   async function handleSave(){
     const id=extractSheetId(sheetId);
-    if(!id){setError("Pegá el link de tu Google Sheet");return;}
+    if(!id){setError("Pega el link de tu Google Sheet");return;}
     setSaving(true);
     const base=`https://docs.google.com/spreadsheets/d/e/${id}/pub?single=true&output=csv`;
     const config:UserConfig={
@@ -2575,7 +2575,7 @@ function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void
         </div>
         <div style={{fontSize:"20px",fontWeight:700,color:D.ink,marginBottom:"8px"}}>Bienvenido 👋</div>
         <div style={{fontSize:"13px",color:D.ink2,marginBottom:"2rem",lineHeight:1.6}}>
-          Para comenzar, pegá el link de tu Google Sheet con los datos de clientes. Debe ser un sheet publicado en la web (Archivo → Compartir → Publicar en la web).
+          Para comenzar, pega el link de tu Google Sheet con los datos de clientes. Debe ser un sheet publicado en la web (Archivo → Compartir → Publicar en la web).
         </div>
         <div style={{marginBottom:"1rem"}}>
           <div style={{fontSize:"12px",fontWeight:500,color:D.ink2,marginBottom:"6px"}}>Link del Google Sheet</div>
@@ -2588,7 +2588,7 @@ function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void
           {error&&<div style={{fontSize:"11px",color:"#dc2626",marginTop:"4px"}}>{error}</div>}
         </div>
         <div style={{background:"#F0F9FF",borderRadius:"10px",padding:"10px 14px",marginBottom:"1.5rem",fontSize:"11px",color:"#0369A1",lineHeight:1.6}}>
-          <strong>Cómo publicar tu sheet:</strong> Abrí el Google Sheet → Archivo → Compartir → Publicar en la web → Publicar. Luego copiá el link de la hoja.
+          <strong>Cómo publicar tu sheet:</strong> Abre el Google Sheet → Archivo → Compartir → Publicar en la web → Publicar. Luego copia el link de la hoja.
         </div>
         <button onClick={handleSave} disabled={saving||!sheetId.trim()} style={{width:"100%",padding:"12px",borderRadius:"10px",border:"none",background:sheetId.trim()?D.accent:"#E5E7EB",color:sheetId.trim()?"white":D.ink3,fontSize:"14px",fontWeight:600,cursor:sheetId.trim()?"pointer":"default"}}>
           {saving?"Guardando...":"Comenzar →"}
