@@ -358,12 +358,8 @@ function AtencionHoy({clients,transcripts}:{clients:ClientRecord[];transcripts:T
     const p1Active=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado").slice(0,5);
     const clientsContext=p1Active.map(c=>{
       const lastMeetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,2).map(m=>`[${m.type} ${m.date}] ${m.notes?.substring(0,200)||""}`);
-      return `${c.companyName} (${c.subStage||c.stage}, ${c.mwp}MWp):
-${lastMeetings.join("
-")||"Sin historial reciente"}`;
-    }).join("
-
-");
+      return c.companyName+" ("+( c.subStage||c.stage)+", "+c.mwp+"MWp):\n"+(lastMeetings.join("\n")||"Sin historial reciente");
+    }).join("\n\n");
 
     if(clientsContext.trim()){
       try{
