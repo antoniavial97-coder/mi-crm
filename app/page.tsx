@@ -3414,8 +3414,6 @@ export default function Home(){
               </div>
             )}
             <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId} alertOnly={false}/>
-            <KPISemanal clients={activeClients} transcripts={transcripts}/>
-            <ForecastAlert clients={activeClients}/>
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <Recordatorios clients={activeClients} transcripts={transcripts}/>
 
@@ -3429,6 +3427,8 @@ export default function Home(){
               <ConversionRate clients={clients}/>
             </div>
             <ProyeccionMWpChart clients={activeClients}/>
+            <KPISemanal clients={activeClients} transcripts={transcripts}/>
+            <ForecastAlert clients={activeClients}/>
           </div>
         )}
         {activeTab==="semana"&&<SemanaTab clients={activeClients} transcripts={transcripts} onUpdateTasks={updateClientTasks}/>}
