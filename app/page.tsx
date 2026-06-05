@@ -295,6 +295,162 @@ function getLastActivity(c:ClientRecord,transcripts:TranscriptInfo[],recentConta
   return new Date(Math.max(...fechas.map(d=>d.getTime())));
 }
 
+// --- Atención Hoy (IA Proactiva) ---------------------------------------------
+function AtencionHoy({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+  const [alerts,setAlerts]=useState<Array<{tipo:"urgente"|"warning"|"info";titulo:string;detalle:string;clientName:string}>>([]);
+  const [loading,setLoading]=useState(false);
+  const [open,setOpen]=useState(true);
+  const [analyzed,setAnalyzed]=useState(false);
+  const hoy=todayISO();
+
+  useEffect(()=>{
+    if(analyzed||clients.length===0)return;
+    setAnalyzed(true);
+    runAnalysis();
+  },[clients.length]);
+
+  async function runAnalysis(){
+    setLoading(true);
+    const staticAlerts:Array<{tipo:"urgente"|"warning"|"info";titulo:string;detalle:string;clientName:string}>=[];
+
+    // 1. Reuniones hoy
+    for(const c of clients){
+      for(const m of (c.meetings||[])){
+        if(m.pending&&!m.fromDiio&&m.date===hoy){
+          staticAlerts.push({tipo:"urgente",titulo:`Reunión hoy${m.time?" a las "+m.time+" hrs":""}`,detalle:m.subject||m.notes?.substring(0,80)||"Sin descripción",clientName:c.companyName});
+        }
+      }
+    }
+
+    // 2. Reuniones mañana
+    const manana=new Date();manana.setDate(manana.getDate()+1);
+    const mananaISO=manana.toISOString().slice(0,10);
+    for(const c of clients){
+      for(const m of (c.meetings||[])){
+        if(m.pending&&!m.fromDiio&&m.date===mananaISO){
+          staticAlerts.push({tipo:"warning",titulo:`Reunión mañana${m.time?" a las "+m.time+" hrs":""}`,detalle:m.subject||m.notes?.substring(0,80)||"Sin descripción",clientName:c.companyName});
+        }
+      }
+    }
+
+    // 3. Clientes P1 sin contacto hace +14 días
+    const hoyDate=new Date();
+    const p1SinContacto=clients
+      .filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado")
+      .map(c=>{
+        const fechas:Date[]=[];
+        if(c.lastContactISO){const d=new Date(c.lastContactISO);if(!isNaN(d.getTime()))fechas.push(d);}
+        for(const m of (c.meetings||[])){const d=new Date(m.date);if(!isNaN(d.getTime()))fechas.push(d);}
+        for(const t of transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())){const d=new Date(t.date);if(!isNaN(d.getTime()))fechas.push(d);}
+        const ultima=fechas.length>0?new Date(Math.max(...fechas.map(d=>d.getTime()))):null;
+        const dias=ultima?Math.floor((hoyDate.getTime()-ultima.getTime())/(1000*60*60*24)):999;
+        return{c,dias,ultima};
+      })
+      .filter(x=>x.dias>=14)
+      .sort((a,b)=>b.dias-a.dias)
+      .slice(0,3);
+
+    for(const {c,dias} of p1SinContacto){
+      staticAlerts.push({tipo:dias>21?"urgente":"warning",titulo:`Sin contacto hace ${dias} días`,detalle:`${c.subStage||c.stage} · ${c.mwp} MWp`,clientName:c.companyName});
+    }
+
+    // 4. IA: analizar correos sin respuesta y compromisos pendientes
+    const p1Active=clients.filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado").slice(0,5);
+    const clientsContext=p1Active.map(c=>{
+      const lastMeetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,2).map(m=>`[${m.type} ${m.date}] ${m.notes?.substring(0,200)||""}`);
+      return `${c.companyName} (${c.subStage||c.stage}, ${c.mwp}MWp):
+${lastMeetings.join("
+")||"Sin historial reciente"}`;
+    }).join("
+
+");
+
+    if(clientsContext.trim()){
+      try{
+        const res=await fetch("/api/generate-actions",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            company:"Pipeline completo",
+            stage:"Sales Manager",
+            comment:`Hoy es ${hoy}. Analiza este pipeline y detecta máximo 3 alertas críticas que requieren acción HOY o esta semana.
+SOLO incluye alertas si hay evidencia concreta en el historial:
+- Correos enviados sin respuesta hace +3 días (menciona el correo específico)
+- Compromisos prometidos que no se cumplieron (menciona qué se prometió y cuándo)
+- Negociaciones que llevan mucho tiempo estancadas en la misma etapa
+
+FORMATO: Responde SOLO con JSON: {"alerts":[{"tipo":"urgente","titulo":"Acción específica","detalle":"Contexto concreto","clientName":"Nombre empresa"}]}
+Si no hay alertas reales, devuelve {"alerts":[]}`,
+            transcripts:[clientsContext]
+          })
+        });
+        const data=await res.json() as {tasks?:string[]};
+        // Parse AI response if it contains JSON alerts
+        const text=(data.tasks||[]).join("");
+        try{
+          const match=text.match(/\{[\s\S]*\}/);
+          if(match){
+            const parsed=JSON.parse(match[0]) as {alerts?:Array<{tipo:"urgente"|"warning"|"info";titulo:string;detalle:string;clientName:string}>};
+            if(parsed.alerts?.length){staticAlerts.push(...parsed.alerts.slice(0,3));}
+          }
+        }catch{}
+      }catch{}
+    }
+
+    setAlerts(staticAlerts.slice(0,6));
+    setLoading(false);
+  }
+
+  if(loading)return(
+    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"14px 18px",display:"flex",alignItems:"center",gap:"10px"}}>
+      <span style={{fontSize:"12px",color:D.ink3,animation:"pulse 1.5s ease infinite"}}>✦ Analizando tu pipeline...</span>
+    </div>
+  );
+
+  if(alerts.length===0&&!loading)return null;
+
+  const urgentes=alerts.filter(a=>a.tipo==="urgente");
+  const warnings=alerts.filter(a=>a.tipo==="warning");
+
+  return(
+    <div style={{background:D.white,border:`1px solid ${urgentes.length>0?"#FECACA":D.border}`,borderRadius:"16px",overflow:"hidden",boxShadow:D.shadow}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <div style={{width:"36px",height:"36px",borderRadius:"10px",background:urgentes.length>0?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#F59E0B,#D97706)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>
+            {urgentes.length>0?"🔴":"⚡"}
+          </div>
+          <div style={{textAlign:"left"}}>
+            <div style={{fontSize:"13px",fontWeight:600,color:D.ink,display:"flex",alignItems:"center",gap:"8px"}}>
+              Atención hoy
+              <span style={{fontSize:"10px",background:urgentes.length>0?"#FEE2E2":"#FEF3C7",color:urgentes.length>0?"#DC2626":"#92400E",padding:"2px 8px",borderRadius:"10px",fontWeight:600}}>
+                {alerts.length} {alerts.length===1?"alerta":"alertas"}
+              </span>
+            </div>
+            <div style={{fontSize:"11px",color:D.ink3,marginTop:"2px"}}>Generado por IA · {urgentes.length} urgente{urgentes.length!==1?"s":""}, {warnings.length} importante{warnings.length!==1?"s":""}</div>
+          </div>
+        </div>
+        <span style={{color:D.ink3,fontSize:"11px"}}>{open?"▲":"▼"}</span>
+      </button>
+      {open&&(
+        <div style={{borderTop:`1px solid ${D.border}`,padding:"12px 18px",display:"flex",flexDirection:"column",gap:"8px"}}>
+          {alerts.map((a,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"flex-start",gap:"12px",padding:"10px 14px",borderRadius:"10px",
+              background:a.tipo==="urgente"?"#FFF5F5":a.tipo==="warning"?"#FFFBEB":"#F0F9FF",
+              border:`1px solid ${a.tipo==="urgente"?"#FECACA":a.tipo==="warning"?"#FDE68A":"#BFDBFE"}`}}>
+              <span style={{fontSize:"16px",flexShrink:0}}>{a.tipo==="urgente"?"🔴":a.tipo==="warning"?"⚠️":"ℹ️"}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:"11px",fontWeight:700,color:D.ink,marginBottom:"2px"}}>{a.clientName}</div>
+                <div style={{fontSize:"12px",fontWeight:600,color:a.tipo==="urgente"?"#DC2626":a.tipo==="warning"?"#92400E":"#1D4ED8",marginBottom:"2px"}}>{a.titulo}</div>
+                <div style={{fontSize:"11px",color:D.ink2,lineHeight:1.4}}>{a.detalle}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Dashboard Panels (Sin Contacto + Mi Día) --------------------------------
 function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLastContact,onMarkContact,recentContacts,alertOnly,userId}:{clients:ClientRecord[];transcripts:TranscriptInfo[];onEdit:(id:string)=>void;onUpdateMeetings:(id:string,meetings:Meeting[])=>void;onUpdateLastContact:(id:string)=>void;onMarkContact:(id:string)=>void;recentContacts:Record<string,string>;alertOnly?:boolean;userId:string}){
   const [miDiaOpen,setMiDiaOpen]=useState(false);
@@ -393,7 +549,14 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
           body:JSON.stringify({
             company:client.companyName,
             stage:`${client.stage}${client.subStage?" - "+client.subStage:""}`,
-            comment:`Basándote en el historial, sugiere acciones comerciales específicas y urgentes. Tareas ya pendientes: ${pendingTasks.join(", ")||"ninguna"}. Solo sugiere lo realmente necesario ahora. Sé breve y concreto. Incluye el nombre del cliente en cada tarea.`,
+            comment:`Eres un asistente comercial experto. Analiza el historial REAL de este cliente y sugiere máximo 2 acciones MUY concretas y urgentes. 
+REGLAS ESTRICTAS:
+- Cada acción debe mencionar nombres reales, fechas reales o contenido real del historial
+- PROHIBIDO: "hacer seguimiento", "contactar al cliente", "revisar propuesta" sin contexto específico
+- CORRECTO: "Llamar a Francisco Araya (Hacienda Chorombo) para pedir poderes simples firmados prometidos el 14/05"
+- Si no hay nada urgente real, devuelve array vacío
+- Tareas ya pendientes (NO repetir): ${pendingTasks.join(", ")||"ninguna"}
+Devuelve solo las acciones más críticas basadas en hechos concretos del historial.`,
             transcripts:context
           })
         });
@@ -871,7 +1034,18 @@ function TareasPanel({client,onUpdateTasks,transcripts}:{client:ClientRecord;onU
         body:JSON.stringify({
           company:client.companyName,
           stage:`${client.stage}${client.subStage?" - "+client.subStage:""}`,
-          comment:`Genera acciones comerciales específicas y concretas para el siguiente cliente. Basate en el historial de reuniones, correos y llamados. Si hay tareas completadas recientemente (especialmente correos enviados), evalúa si es necesario hacer seguimiento. Las tareas ya pendientes son: ${pendingTasks.join(", ")||"ninguna"}. Solo sugiere lo que realmente tiene sentido hacer ahora. Sé específico con nombres y contexto.`,
+          comment:`Eres un asistente comercial experto en ventas B2B de energía solar en Chile.
+Analiza el historial REAL de este cliente y sugiere máximo 2-3 próximas acciones críticas.
+
+REGLAS:
+- Basa CADA acción en algo concreto del historial (nombre, fecha, acuerdo, documento)
+- PROHIBIDO ser genérico: NO "hacer seguimiento", NO "enviar propuesta" sin contexto
+- CORRECTO: "Llamar a [nombre] para confirmar [acuerdo específico] acordado el [fecha]"
+- Si enviaron un correo sin respuesta hace +5 días, sugiere llamar
+- Si hay reunión agendada próxima, sugiere preparación específica
+- Tareas ya pendientes (NO duplicar): ${pendingTasks.join(", ")||"ninguna"}
+
+Devuelve SOLO acciones urgentes y concretas. Si no hay nada crítico real, devuelve array vacío.`,
           transcripts:clientTranscripts
         })
       });
@@ -2933,9 +3107,10 @@ export default function Home(){
                 <span style={{fontSize:"11px",color:D.ink3}}>Proyectos fuera del año 2026</span>
               </div>
             )}
+            <AtencionHoy clients={activeClients} transcripts={transcripts}/>
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
             <Recordatorios clients={activeClients} transcripts={transcripts}/>
-            <ResumenSemanal clients={activeClients} transcripts={transcripts}/>
+
             <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
               <ProbChart clients={activeClients}/>
