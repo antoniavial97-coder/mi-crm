@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { useUser, UserButton } from "@clerk/nextjs";
+import { useUser, UserButton, useClerk, SignOutButton } from "@clerk/nextjs";
 import { saveClientsToSupabase, loadClientsFromSupabase, saveDailyTasksToSupabase, loadDailyTasksFromSupabase, saveRemindersToSupabase, loadRemindersFromSupabase } from "../lib/supabase-client";
 
 // --- Types --------------------------------------------------------------------
@@ -10,7 +10,7 @@ type SubStage =
   | "Evaluación preliminar" | "Primera presentación preliminar"
   | "Visita técnica realizada" | "Presentación final"
   | "Contrato en revisión" | "Contrato firmado";
-type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana" | "chat";
+type Tab = "dashboard" | "pipeline1" | "pipeline2" | "prospectos" | "perdidos" | "semana" | "chat" | "perfil" | "calendario";
 type FollowUp = { id: string; text: string; dueDateISO: string; done: boolean; dismissed: boolean; };
 type ClientTask = { id: string; text: string; done: boolean; followUp?: FollowUp; };
 type DailyTask = { id: string; text: string; done: boolean; date: string; clientId?: string; clientName?: string; urgent?: boolean; };
@@ -1695,105 +1695,6 @@ function ProyeccionMWpChart({clients}:{clients:ClientRecord[]}){
   );
 }
 
-function EmbudoPipeline({clients}:{clients:ClientRecord[]}){
-  const hoy=new Date();
-  const stats=useMemo(()=>{
-    const stages=[
-      {label:"Prospecto Pasivo",key:"Prospecto Pasivo",color:"#94A3B8"},
-      {label:"Prospecto Activo",key:"Prospecto Activo",color:"#60A5FA"},
-      {label:"Pipeline P2",key:"Pipeline P2",color:"#F59E0B"},
-      {label:"Pipeline P1",key:"Pipeline P1",color:"#E8500A"},
-      {label:"Firmado",key:"firmado",color:"#22C55E"},
-    ];
-    return stages.map(s=>{
-      const items=s.key==="firmado"
-        ?clients.filter(c=>c.subStage==="Contrato firmado")
-        :clients.filter(c=>c.stage===s.key&&c.subStage!=="Contrato firmado");
-      const mwp=items.reduce((a,c)=>a+(c.mwp||0),0);
-      // Avg days in stage
-      const dias=items.filter(c=>c.stageDate).map(c=>Math.floor((hoy.getTime()-new Date(c.stageDate!).getTime())/(1000*60*60*24)));
-      const avgDias=dias.length>0?Math.round(dias.reduce((a,b)=>a+b,0)/dias.length):0;
-      return{...s,count:items.length,mwp:Math.round(mwp*100)/100,avgDias};
-    });
-  },[clients]);
-
-  const maxCount=Math.max(...stats.map(s=>s.count),1);
-
-  return(
-    <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem"}}>
-      <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"4px"}}>Embudo de conversión</div>
-      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1.25rem"}}>Clientes por etapa · tiempo promedio en etapa</div>
-      <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-        {stats.map((s,i)=>(
-          <div key={s.key} style={{display:"flex",alignItems:"center",gap:"12px"}}>
-            <div style={{width:"130px",fontSize:"11px",color:D.ink2,fontWeight:500,flexShrink:0,textAlign:"right"}}>{s.label}</div>
-            <div style={{flex:1,position:"relative",height:"32px",display:"flex",alignItems:"center"}}>
-              <div style={{
-                height:"28px",
-                width:`${Math.max((s.count/maxCount)*100,s.count>0?8:2)}%`,
-                background:s.color,
-                borderRadius:"6px",
-                opacity:s.count===0?0.2:1,
-                transition:"width 0.5s ease",
-                display:"flex",alignItems:"center",paddingLeft:"10px",
-                minWidth:s.count>0?"60px":"20px"
-              }}>
-                {s.count>0&&<span style={{fontSize:"11px",fontWeight:700,color:"white",whiteSpace:"nowrap"}}>{s.count} · {s.mwp.toFixed(1)} MWp</span>}
-              </div>
-            </div>
-            <div style={{width:"80px",fontSize:"10px",color:D.ink3,textAlign:"right",flexShrink:0}}>
-              {s.avgDias>0?`~${s.avgDias}d promedio`:""}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function StancamientoAlert({clients}:{clients:ClientRecord[]}){
-  const hoy=new Date();
-  const stancados=useMemo(()=>{
-    return clients
-      .filter(c=>c.stage==="Pipeline P1"&&c.subStage!=="Contrato firmado"&&c.stageDate)
-      .map(c=>{
-        const dias=Math.floor((hoy.getTime()-new Date(c.stageDate!).getTime())/(1000*60*60*24));
-        const limite=c.subStage==="Contrato en revisión"?30:c.subStage==="Presentación final"?45:c.subStage==="Visita técnica realizada"?60:90;
-        return{c,dias,limite,pct:Math.round((dias/limite)*100)};
-      })
-      .filter(x=>x.dias>x.limite*0.7)
-      .sort((a,b)=>b.pct-a.pct);
-  },[clients]);
-
-  if(stancados.length===0)return null;
-
-  return(
-    <div style={{background:D.white,border:`1px solid #FED7AA`,borderRadius:"16px",padding:"1.25rem"}}>
-      <div style={{fontSize:"13px",fontWeight:600,color:"#C2410C",marginBottom:"4px",display:"flex",alignItems:"center",gap:"8px"}}>
-        ⏱ Oportunidades estancadas
-        <span style={{fontSize:"10px",background:"#FEF3C7",color:"#92400E",padding:"2px 8px",borderRadius:"10px",fontWeight:600}}>{stancados.length}</span>
-      </div>
-      <div style={{fontSize:"11px",color:D.ink3,marginBottom:"1rem"}}>Llevan más del 70% del tiempo esperado en su etapa</div>
-      <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-        {stancados.map(({c,dias,limite,pct})=>(
-          <div key={c.id} style={{display:"flex",alignItems:"center",gap:"12px",padding:"10px 12px",background:"#FFFBEB",borderRadius:"10px",border:"1px solid #FDE68A"}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:"12px",fontWeight:600,color:D.ink}}>{c.companyName}</div>
-              <div style={{fontSize:"10px",color:D.ink3,marginTop:"2px"}}>{c.subStage} · {c.mwp} MWp</div>
-            </div>
-            <div style={{flexShrink:0,textAlign:"right"}}>
-              <div style={{fontSize:"12px",fontWeight:700,color:pct>=100?"#DC2626":"#D97706"}}>{dias}d / {limite}d</div>
-              <div style={{width:"80px",height:"4px",background:"#E5E7EB",borderRadius:"2px",marginTop:"4px",overflow:"hidden"}}>
-                <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:pct>=100?"#DC2626":"#F59E0B",borderRadius:"2px"}}/>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function ConversionRate({clients}:{clients:ClientRecord[]}){
   const stats=useMemo(()=>{
     const prospectos=clients.filter(c=>c.stage==="Prospecto Activo"||c.stage==="Prospecto Pasivo").length;
@@ -2739,6 +2640,208 @@ function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void
   );
 }
 
+// --- Calendario Tab ----------------------------------------------------------
+type CalEvent = {fecha:string;tipo:string;empresa:string;detalle:string;color:string};
+
+function CalendarioTab({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+  const hoy=new Date();
+  const [mesActual,setMesActual]=useState(`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}`);
+
+  const eventos:CalEvent[]=useMemo(()=>{
+    const evs:CalEvent[]=[];
+    // Meetings from clients
+    for(const c of clients){
+      for(const m of (c.meetings||[])){
+        if(!m.date)continue;
+        const mes=m.date.substring(0,7);
+        if(mes!==mesActual)continue;
+        const tipo=m.type==="reunion"?"Reunión":m.type==="llamado"?"Llamado":m.type==="correo"?"Correo":"Tarea";
+        const color=m.type==="reunion"?"#E8500A":m.type==="llamado"?"#7C3AED":m.type==="correo"?"#0891B2":"#16A34A";
+        evs.push({fecha:m.date,tipo,empresa:c.companyName,detalle:m.subject||m.notes?.substring(0,60)||"",color});
+      }
+    }
+    // Diio transcripts
+    for(const t of transcripts){
+      if(!t.date)continue;
+      let fecha=t.date;
+      if(fecha.includes("/")){const p=fecha.split("/");if(p.length===3&&p[2].length===4)fecha=`${p[2]}-${p[1].padStart(2,"0")}-${p[0].padStart(2,"0")}`;}
+      const mes=fecha.substring(0,7);
+      if(mes!==mesActual)continue;
+      evs.push({fecha,tipo:"Reunión",empresa:t.company,detalle:"Transcripción Diio",color:"#7C3AED"});
+    }
+    return evs.sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  },[clients,transcripts,mesActual]);
+
+  // Build calendar grid
+  const [year,month]=mesActual.split("-").map(Number);
+  const firstDay=new Date(year,month-1,1).getDay();
+  const daysInMonth=new Date(year,month,0).getDate();
+  const todayStr=`${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,"0")}-${String(hoy.getDate()).padStart(2,"0")}`;
+
+  const meses=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const dias=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+
+  function prevMes(){const d=new Date(year,month-2,1);setMesActual(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}
+  function nextMes(){const d=new Date(year,month,1);setMesActual(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);}
+
+  const eventosPorDia=(dia:number)=>{
+    const fechaStr=`${year}-${String(month).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;
+    return eventos.filter(e=>e.fecha===fechaStr);
+  };
+
+  const [diaSeleccionado,setDiaSeleccionado]=useState<number|null>(null);
+  const eventosSeleccionados=diaSeleccionado?eventosPorDia(diaSeleccionado):[];
+
+  return(
+    <div style={{display:"flex",gap:"1.5rem",animation:"fadeIn 0.2s ease"}}>
+      {/* Calendario */}
+      <div style={{flex:1}}>
+        <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden"}}>
+          {/* Header mes */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"1rem 1.25rem",borderBottom:`1px solid ${D.border}`}}>
+            <button onClick={prevMes} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"8px",padding:"6px 12px",cursor:"pointer",fontSize:"13px",color:D.ink2}}>←</button>
+            <div style={{fontSize:"15px",fontWeight:600,color:D.ink}}>{meses[month-1]} {year}</div>
+            <button onClick={nextMes} style={{background:"none",border:`1px solid ${D.border}`,borderRadius:"8px",padding:"6px 12px",cursor:"pointer",fontSize:"13px",color:D.ink2}}>→</button>
+          </div>
+          {/* Días semana */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",borderBottom:`1px solid ${D.border}`}}>
+            {dias.map(d=><div key={d} style={{padding:"8px 0",textAlign:"center",fontSize:"11px",fontWeight:600,color:D.ink3}}>{d}</div>)}
+          </div>
+          {/* Grid días */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)"}}>
+            {Array.from({length:firstDay===0?6:firstDay-1}).map((_,i)=>(
+              <div key={`empty-${i}`} style={{minHeight:"80px",borderRight:`1px solid ${D.border}`,borderBottom:`1px solid ${D.border}`,background:"#FAFAFA"}}/>
+            ))}
+            {Array.from({length:daysInMonth}).map((_,i)=>{
+              const dia=i+1;
+              const fechaStr=`${year}-${String(month).padStart(2,"0")}-${String(dia).padStart(2,"0")}`;
+              const evs=eventosPorDia(dia);
+              const esHoy=fechaStr===todayStr;
+              const esSel=diaSeleccionado===dia;
+              return(
+                <div key={dia} onClick={()=>setDiaSeleccionado(esSel?null:dia)}
+                  style={{minHeight:"80px",borderRight:`1px solid ${D.border}`,borderBottom:`1px solid ${D.border}`,padding:"6px",cursor:"pointer",background:esSel?"#FFF4EE":esHoy?"#FFF9F5":"white",transition:"background 0.1s"}}
+                  onMouseEnter={e=>!esSel&&(e.currentTarget.style.background="#F9F8F6")}
+                  onMouseLeave={e=>!esSel&&(e.currentTarget.style.background=esHoy?"#FFF9F5":"white")}>
+                  <div style={{fontSize:"12px",fontWeight:esHoy?700:500,color:esHoy?D.accent:D.ink,marginBottom:"4px",width:"22px",height:"22px",borderRadius:"50%",background:esHoy?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:esHoy?"white":D.ink}}>{dia}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:"2px"}}>
+                    {evs.slice(0,3).map((ev,j)=>(
+                      <div key={j} style={{fontSize:"9px",fontWeight:500,color:"white",background:ev.color,borderRadius:"4px",padding:"2px 5px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {ev.tipo} {ev.empresa}
+                      </div>
+                    ))}
+                    {evs.length>3&&<div style={{fontSize:"9px",color:D.ink3}}>+{evs.length-3} más</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Panel lateral - eventos del día */}
+      <div style={{width:"280px",flexShrink:0}}>
+        <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1rem",position:"sticky",top:"70px"}}>
+          <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"12px"}}>
+            {diaSeleccionado?`${diaSeleccionado} de ${meses[month-1]}`:"Selecciona un día"}
+          </div>
+          {!diaSeleccionado&&(
+            <div style={{fontSize:"12px",color:D.ink3,textAlign:"center",padding:"2rem 0"}}>Haz click en un día para ver sus actividades</div>
+          )}
+          {diaSeleccionado&&eventosSeleccionados.length===0&&(
+            <div style={{fontSize:"12px",color:D.ink3,textAlign:"center",padding:"2rem 0"}}>Sin actividad registrada</div>
+          )}
+          {eventosSeleccionados.map((ev,i)=>(
+            <div key={i} style={{padding:"10px 12px",borderRadius:"10px",background:D.bg,marginBottom:"8px",borderLeft:`3px solid ${ev.color}`}}>
+              <div style={{fontSize:"11px",fontWeight:700,color:ev.color,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"3px"}}>{ev.tipo}</div>
+              <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"2px"}}>{ev.empresa}</div>
+              {ev.detalle&&<div style={{fontSize:"11px",color:D.ink3,lineHeight:1.4}}>{ev.detalle}</div>}
+            </div>
+          ))}
+          {/* Leyenda */}
+          <div style={{marginTop:"1rem",paddingTop:"1rem",borderTop:`1px solid ${D.border}`}}>
+            <div style={{fontSize:"10px",fontWeight:600,color:D.ink3,textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"8px"}}>Leyenda</div>
+            {[{c:"#E8500A",l:"Reunión"},{c:"#7C3AED",l:"Llamado"},{c:"#0891B2",l:"Correo"},{c:"#16A34A",l:"Tarea"}].map(({c,l})=>(
+              <div key={l} style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"4px"}}>
+                <div style={{width:"10px",height:"10px",borderRadius:"2px",background:c,flexShrink:0}}/>
+                <span style={{fontSize:"11px",color:D.ink2}}>{l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Resumen del mes */}
+        <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1rem",marginTop:"12px"}}>
+          <div style={{fontSize:"12px",fontWeight:600,color:D.ink,marginBottom:"10px"}}>Resumen del mes</div>
+          {[{tipo:"Reunión",color:"#E8500A"},{tipo:"Llamado",color:"#7C3AED"},{tipo:"Correo",color:"#0891B2"},{tipo:"Tarea",color:"#16A34A"}].map(({tipo,color})=>{
+            const count=eventos.filter(e=>e.tipo===tipo).length;
+            return(
+              <div key={tipo} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${D.border}`}}>
+                <span style={{fontSize:"12px",color:D.ink2}}>{tipo}s</span>
+                <span style={{fontSize:"13px",fontWeight:700,color}}>{count}</span>
+              </div>
+            );
+          })}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0 0"}}>
+            <span style={{fontSize:"12px",fontWeight:600,color:D.ink}}>Total</span>
+            <span style={{fontSize:"14px",fontWeight:700,color:D.ink}}>{eventos.length}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Perfil Tab --------------------------------------------------------------
+function PerfilTab({user}:{user:ReturnType<typeof useUser>["user"]}){
+  const {openUserProfile}=useClerk();
+
+  return(
+    <div style={{maxWidth:"560px",margin:"0 auto",animation:"fadeIn 0.2s ease"}}>
+      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"2rem",marginBottom:"1rem"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"1.25rem",marginBottom:"1.5rem"}}>
+          <div style={{width:"64px",height:"64px",borderRadius:"50%",overflow:"hidden",background:D.bg,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            {user?.imageUrl
+              ?<img src={user.imageUrl} alt="Avatar" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+              :<span style={{fontSize:"24px",fontWeight:700,color:D.ink}}>{(user?.firstName||"A")[0]}</span>
+            }
+          </div>
+          <div>
+            <div style={{fontSize:"18px",fontWeight:700,color:D.ink}}>{user?.firstName} {user?.lastName}</div>
+            <div style={{fontSize:"13px",color:D.ink3,marginTop:"2px"}}>{user?.primaryEmailAddress?.emailAddress}</div>
+            <div style={{fontSize:"11px",color:D.ink3,marginTop:"4px"}}>Relationship Manager · Solarity</div>
+          </div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+          <button onClick={()=>openUserProfile()} style={{width:"100%",padding:"12px 16px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"13px",cursor:"pointer",color:D.ink,fontWeight:500,textAlign:"left",display:"flex",alignItems:"center",gap:"10px"}}>
+            <span style={{fontSize:"16px"}}>✏️</span>
+            <span>Editar perfil, foto y nombre</span>
+            <span style={{marginLeft:"auto",color:D.ink3,fontSize:"11px"}}>→</span>
+          </button>
+          <button onClick={()=>openUserProfile()} style={{width:"100%",padding:"12px 16px",borderRadius:"10px",border:`1px solid ${D.border}`,background:D.bg,fontSize:"13px",cursor:"pointer",color:D.ink,fontWeight:500,textAlign:"left",display:"flex",alignItems:"center",gap:"10px"}}>
+            <span style={{fontSize:"16px"}}>🔐</span>
+            <span>Cambiar contraseña</span>
+            <span style={{marginLeft:"auto",color:D.ink3,fontSize:"11px"}}>→</span>
+          </button>
+          <SignOutButton>
+            <button style={{width:"100%",padding:"12px 16px",borderRadius:"10px",border:"1px solid #FECACA",background:"#FFF5F5",fontSize:"13px",cursor:"pointer",color:"#DC2626",fontWeight:500,textAlign:"left",display:"flex",alignItems:"center",gap:"10px"}}>
+              <span style={{fontSize:"16px"}}>🚪</span>
+              <span>Cerrar sesión</span>
+            </button>
+          </SignOutButton>
+        </div>
+      </div>
+      <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",padding:"1.5rem"}}>
+        <div style={{fontSize:"13px",fontWeight:600,color:D.ink,marginBottom:"1rem"}}>Configuración del CRM</div>
+        <div style={{fontSize:"12px",color:D.ink2,marginBottom:"8px"}}>Google Sheet conectado</div>
+        <div style={{fontSize:"11px",color:D.ink3,background:D.bg,padding:"8px 12px",borderRadius:"8px",wordBreak:"break-all"}}>
+          Sheet sincronizado correctamente
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const {user,isLoaded}=useUser();
@@ -2933,12 +3036,14 @@ export default function Home(){
   const tareasCount=useMemo(()=>activeClients.reduce((s,c)=>(c.aiTasks||[]).filter(t=>!t.done).length+s,0),[activeClients]);
   const tabs:[Tab,string][]=[
     ["dashboard","Dashboard"],
+    ["calendario","Calendario"],
     ["semana","Actividades"],
     ["pipeline1","Pipeline P1"],
     ["pipeline2","Pipeline P2"],
     ["prospectos","Prospectos"],
     ["chat","✦ Chat"],
     ["perdidos",`Perdidos${perdidosCount>0?` (${perdidosCount})`:""}` ],
+    ["perfil","Mi Perfil"],
   ];
 
   if(!isLoaded||configLoading)return(
@@ -2949,7 +3054,7 @@ export default function Home(){
   if(!userConfig)return <ConfigScreen userId={userId} onSave={cfg=>{setUserConfig(cfg);}}/>;
 
   const tabIcons:Record<string,string> = {
-    dashboard:"◈",pipeline1:"▸",pipeline2:"▹",prospectos:"◎",perdidos:"✕",semana:"◷",chat:"✦"
+    dashboard:"◈",pipeline1:"▸",pipeline2:"▹",prospectos:"◎",perdidos:"✕",semana:"◷",chat:"✦",perfil:"◉",calendario:"▦"
   };
 
   return(
@@ -2957,7 +3062,7 @@ export default function Home(){
       <style>{fontStyle}</style>
 
       {/* SIDEBAR */}
-      <aside style={{width:"220px",minHeight:"100dvh",background:D.sidebar,display:"flex",flexDirection:"column",position:"fixed",left:0,top:0,bottom:0,zIndex:30,flexShrink:0}}>
+      <aside style={{width:"220px",height:"100dvh",background:D.sidebar,display:"flex",flexDirection:"column",position:"fixed",left:0,top:0,bottom:0,zIndex:30,flexShrink:0,overflowY:"hidden"}}>
         {/* Logo */}
         <div style={{padding:"20px 16px 16px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
           <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"4px"}}>
@@ -2982,7 +3087,7 @@ export default function Home(){
         </div>
 
         {/* Nav */}
-        <nav style={{flex:1,padding:"12px 10px",display:"flex",flexDirection:"column",gap:"2px"}}>
+        <nav style={{flex:1,padding:"12px 10px",display:"flex",flexDirection:"column",gap:"2px",overflowY:"auto",overflowX:"hidden"}}>
           {tabs.map(([tab,label])=>(
             <button key={tab} onClick={()=>setActiveTab(tab)} className={`sidebar-item${activeTab===tab?" active":""}`}
               style={{width:"100%",display:"flex",alignItems:"center",gap:"10px",padding:"9px 10px",border:"none",background:activeTab===tab?"rgba(232,80,10,0.15)":"transparent",cursor:"pointer",textAlign:"left",color:activeTab===tab?D.accent:"rgba(255,255,255,0.5)",fontSize:"13px",fontWeight:activeTab===tab?600:400}}>
@@ -3062,8 +3167,6 @@ export default function Home(){
               <PipelineGeneradoChart clients={clients}/>
               <ConversionRate clients={clients}/>
             </div>
-            <EmbudoPipeline clients={activeClients}/>
-            <StancamientoAlert clients={activeClients}/>
             <ProyeccionMWpChart clients={activeClients}/>
           </div>
         )}
@@ -3073,6 +3176,8 @@ export default function Home(){
         {activeTab==="prospectos"&&<ProspectosTab clients={activeClients} contacts={contacts} transcripts={transcripts} onEdit={openEdit} onDelete={removeClient} onUpdateTasks={updateClientTasks} onUpdateMeetings={updateClientMeetings}/>}
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
         {activeTab==="chat"&&<ChatTab clients={activeClients} transcripts={transcripts}/>}
+        {activeTab==="calendario"&&<CalendarioTab clients={activeClients} transcripts={transcripts}/>}
+        {activeTab==="perfil"&&<PerfilTab user={user}/>}
       </div>
       <Modal open={modalOpen} title={editingId?"Editar cliente":"Agregar cliente"} onClose={()=>setModalOpen(false)}>
         <ClientForm draft={draft} setDraft={setDraft} onSave={saveClient} onCancel={()=>setModalOpen(false)} extractTasksLoading={extractTasksLoading} onExtract={extractTasksWithAI}/>
