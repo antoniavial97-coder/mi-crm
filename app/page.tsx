@@ -2723,7 +2723,7 @@ function CalendarioTab({clients,transcripts}:{clients:ClientRecord[];transcripts
                   style={{minHeight:"80px",borderRight:`1px solid ${D.border}`,borderBottom:`1px solid ${D.border}`,padding:"6px",cursor:"pointer",background:esSel?"#FFF4EE":esHoy?"#FFF9F5":"white",transition:"background 0.1s"}}
                   onMouseEnter={e=>!esSel&&(e.currentTarget.style.background="#F9F8F6")}
                   onMouseLeave={e=>!esSel&&(e.currentTarget.style.background=esHoy?"#FFF9F5":"white")}>
-                  <div style={{fontSize:"12px",fontWeight:esHoy?700:500,color:esHoy?D.accent:D.ink,marginBottom:"4px",width:"22px",height:"22px",borderRadius:"50%",background:esHoy?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:esHoy?"white":D.ink}}>{dia}</div>
+                  <div style={{fontSize:"12px",fontWeight:esHoy?700:500,marginBottom:"4px",width:"22px",height:"22px",borderRadius:"50%",background:esHoy?D.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:esHoy?"white":D.ink}}>{dia}</div>
                   <div style={{display:"flex",flexDirection:"column",gap:"2px"}}>
                     {evs.slice(0,3).map((ev,j)=>(
                       <div key={j} style={{fontSize:"9px",fontWeight:500,color:"white",background:ev.color,borderRadius:"4px",padding:"2px 5px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
