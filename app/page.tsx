@@ -2553,10 +2553,6 @@ function ConfigScreen({userId,onSave}:{userId:string;onSave:(c:UserConfig)=>void
       contactsUrl:`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=652559693`,
       transcriptsUrl:`https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=1050795278`,
     };
-    // Try to detect if it's a published URL (pub) or regular sheet
-    const pubBase=url=>url.includes("/pub?")?url:
-      `https://docs.google.com/spreadsheets/d/e/${id}/pub?single=true&output=csv`;
-    
     // Just use the sheet ID to build CSV URLs
     const finalConfig:UserConfig={
       sheetUrl:sheetId.includes("pub?")?sheetId:
