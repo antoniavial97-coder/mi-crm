@@ -2953,12 +2953,10 @@ export default function Home(){
         {activeTab==="perdidos"&&<PerdidosTab clients={clients}/>}
         {activeTab==="chat"&&<ChatTab clients={activeClients} transcripts={transcripts}/>}
       </div>
-
       <Modal open={modalOpen} title={editingId?"Editar cliente":"Agregar cliente"} onClose={()=>setModalOpen(false)}>
         <ClientForm draft={draft} setDraft={setDraft} onSave={saveClient} onCancel={()=>setModalOpen(false)} extractTasksLoading={extractTasksLoading} onExtract={extractTasksWithAI}/>
       </Modal>
-    </div>
-    </main>
+      </main>
   </div>
   );
 }
