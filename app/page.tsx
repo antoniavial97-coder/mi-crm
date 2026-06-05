@@ -1751,7 +1751,7 @@ function EmbudoPipeline({clients}:{clients:ClientRecord[]}){
   );
 }
 
-function StancamientoAlertAlert({clients}:{clients:ClientRecord[]}){
+function StancamientoAlert({clients}:{clients:ClientRecord[]}){
   const hoy=new Date();
   const stancados=useMemo(()=>{
     return clients
