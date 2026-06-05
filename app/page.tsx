@@ -2790,6 +2790,5 @@ export default function Home(){
         <ClientForm draft={draft} setDraft={setDraft} onSave={saveClient} onCancel={()=>setModalOpen(false)} extractTasksLoading={extractTasksLoading} onExtract={extractTasksWithAI}/>
       </Modal>
     </div>
-    </>}
   );
 }
