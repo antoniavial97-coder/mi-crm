@@ -390,23 +390,23 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   const [alertTick,setAlertTick]=useState(0);
   const hoy=todayISO();
 
+  const tasksLoadedRef=useRef(false);
   useEffect(()=>{
     if(!userId)return;
+    tasksLoadedRef.current=false;
     loadDailyTasksFromSupabase(userId).then(raw=>{
       if(raw.length>0){
-        // Preserve done state exactly as saved, only update date for pending tasks from past days
         const loaded=(raw as DailyTask[]).map(t=>({
           ...t,
-          // Keep done tasks as-is, update date only for non-done tasks from today
           date:t.done?t.date:hoy
         }));
         setTasks(loaded);
       }
-    }).catch(()=>{});
+      tasksLoadedRef.current=true;
+    }).catch(()=>{tasksLoadedRef.current=true;});
   },[userId]);
   useEffect(()=>{
-    if(!userId)return;
-    // Always save when tasks change (including when marked done)
+    if(!userId||!tasksLoadedRef.current)return;
     saveDailyTasksToSupabase(userId,tasks);
     try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));}catch{}
   },[tasks,userId]);
