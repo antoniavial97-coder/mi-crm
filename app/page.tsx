@@ -3226,20 +3226,27 @@ export default function Home(){
          draft.lostReason==="venta_directa"?"Cliente quiere venta directa":
          draft.lostReason==="sin_interes"?"Sin interés":
          "Sin factibilidad técnica"):draft.nextAction};
+    let updated:ClientRecord[]=[];
     if(!editingId){
       const newHistory:StageChange[]=[{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}];
-      setClients(prev=>[{id:newId(),...n,createdAtISO:now,updatedAtISO:now,stageHistory:newHistory},...prev]);
+      const newClient={id:newId(),...n,createdAtISO:now,updatedAtISO:now,stageHistory:newHistory} as ClientRecord;
+      setClients(prev=>{updated=[newClient,...prev];return updated;});
     } else {
-      setClients(prev=>prev.map(c=>{
-        if(c.id!==editingId)return c;
-        const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;
-        const newHistory:StageChange[]=stageChanged
-          ?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]
-          :(c.stageHistory||[]);
-        return {...c,...n,updatedAtISO:now,stageHistory:newHistory};
-      }));
+      setClients(prev=>{
+        updated=prev.map(c=>{
+          if(c.id!==editingId)return c;
+          const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;
+          const newHistory:StageChange[]=stageChanged
+            ?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]
+            :(c.stageHistory||[]);
+          return {...c,...n,updatedAtISO:now,stageHistory:newHistory};
+        });
+        return updated;
+      });
     }
     setModalOpen(false);
+    // Save directly to Supabase without waiting for useEffect
+    setTimeout(()=>{if(userId&&updated.length>0)saveClientsToSupabase(userId,updated);},100);
   }
   async function extractTasksWithAI(){
     if(!draft.notes.trim()){window.alert("Escribe notas antes.");return;}
