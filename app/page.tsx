@@ -407,7 +407,7 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
   },[userId]);
   useEffect(()=>{
     if(!userId||!tasksLoadedRef.current)return;
-    saveDailyTasksToSupabase(userId,tasks);
+    // Save handled directly in toggleTask and other mutating functions
     try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(tasks));}catch{}
   },[tasks,userId]);
 
@@ -435,8 +435,8 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
     setTasks(prev=>[...prev,{id:newId(),text,done:false,date:hoy,clientId:client?.id,clientName:client?.companyName}]);
     setInput("");setSelectedClient("");
   }
-  function toggleTask(id:string){
-    setTasks(prev=>prev.map(t=>{
+  async function toggleTask(id:string){
+    const updated=tasks.map(t=>{
       if(t.id!==id)return t;
       const nowDone=!t.done;
       if(nowDone&&t.clientId){
@@ -450,11 +450,20 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
         }
       }
       return {...t,done:nowDone};
-    }));
+    });
+    setTasks(updated);
+    // Save immediately and wait for confirmation
+    await saveDailyTasksToSupabase(userId,updated);
+    try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(updated));}catch{}
   }
   function assignClient(taskId:string,clientId:string){const client=clients.find(c=>c.id===clientId);setTasks(prev=>prev.map(t=>t.id===taskId?{...t,clientId:client?.id,clientName:client?.companyName}:t));setEditingClientFor(null);}
   function deleteTask(id:string){setTasks(prev=>prev.filter(t=>t.id!==id));}
-  function clearCompleted(){setTasks(prev=>prev.filter(t=>!t.done));}
+  async function clearCompleted(){
+    const updated=tasks.filter(t=>!t.done);
+    setTasks(updated);
+    await saveDailyTasksToSupabase(userId,updated);
+    try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(updated));}catch{}
+  }
 
   async function generateAISuggestions(){
     setLoadingSugg(true);setAiSuggestions([]);
