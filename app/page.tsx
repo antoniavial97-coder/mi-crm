@@ -429,11 +429,15 @@ function DashboardPanels({clients,transcripts,onEdit,onUpdateMeetings,onUpdateLa
     setAlertTick(t=>t+1);
     onMarkContact(clientId);
   }
-  function addTask(){
+  async function addTask(){
     const text=input.trim();if(!text)return;
     const client=clients.find(c=>c.id===selectedClient);
-    setTasks(prev=>[...prev,{id:newId(),text,done:false,date:hoy,clientId:client?.id,clientName:client?.companyName}]);
+    const newTask={id:newId(),text,done:false,date:hoy,clientId:client?.id,clientName:client?.companyName};
+    const updated=[...tasks,newTask];
+    setTasks(updated);
     setInput("");setSelectedClient("");
+    if(userId)await saveDailyTasksToSupabase(userId,updated);
+    try{localStorage.setItem(MI_DIA_KEY,JSON.stringify(updated));}catch{}
   }
   async function toggleTask(id:string){
     const updated=tasks.map(t=>{
@@ -3180,8 +3184,7 @@ export default function Home(){
     });
   },[isLoaded,userId]);
   useEffect(()=>{if(userConfig&&userId)loadFromSheet();},[userConfig,userId,loadFromSheet]);
-  // Save to Supabase whenever clients change
-  useEffect(()=>{if(clients.length>0&&userId){saveClientsToSupabase(userId,clients);}},[clients,userId]);
+  // Clients are saved directly in each mutation function - no useEffect needed
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
   function updateClientMeetings(clientId:string,meetings:Meeting[]){
@@ -3245,8 +3248,13 @@ export default function Home(){
       });
     }
     setModalOpen(false);
-    // Save directly to Supabase without waiting for useEffect
-    setTimeout(()=>{if(userId&&updated.length>0)saveClientsToSupabase(userId,updated);},100);
+    // Save directly to Supabase
+    setTimeout(async()=>{
+      const current=editingId
+        ?clients.map(c=>{if(c.id!==editingId)return c;const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;const newHistory=stageChanged?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]:(c.stageHistory||[]);return {...c,...n,updatedAtISO:now,stageHistory:newHistory};})
+        :[{id:newId(),...n,createdAtISO:now,updatedAtISO:now} as ClientRecord,...clients];
+      if(userId)await saveClientsToSupabase(userId,current);
+    },50);
   }
   async function extractTasksWithAI(){
     if(!draft.notes.trim()){window.alert("Escribe notas antes.");return;}
