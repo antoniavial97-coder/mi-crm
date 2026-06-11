@@ -2101,12 +2101,16 @@ function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts
   const notifiedRef=useRef<Set<string>>(new Set());
   const hoy=todayISO();
 
-  // Load reminders from localStorage on mount
+  // Load reminders from localStorage on mount + auto-analyze once per day
   useEffect(()=>{
     setReminders(getReminders());
     const la=typeof window!=="undefined"?localStorage.getItem("solar-crm:reminders-analyzed"):null;
     setLastAnalyzed(la);
-  },[]);
+    // Auto-analyze if not done today and we have clients
+    if(la!==hoy&&clients.length>0){
+      setTimeout(()=>analyzeAll(),2000); // wait 2s for data to settle
+    }
+  },[clients.length]);// eslint-disable-line
 
   // Save reminders whenever they change
   useEffect(()=>{saveReminders(reminders);},[reminders]);
@@ -2123,10 +2127,12 @@ function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts
       let changed=false;
       for(const r of current){
         if(r.dismissed)continue;
-        // 5 days before
-        if(r.fechaISO===in5Str&&!r.notified5d&&!notifiedRef.current.has(r.id+"-5d")){
-          notifiedRef.current.add(r.id+"-5d");
-          new Notification("📌 Recordatorio en 5 días",{body:`${r.clientName}: ${r.descripcion}`,icon:"/favicon.ico"});
+        // 10 days before
+        const in10=new Date(now);in10.setDate(in10.getDate()+10);
+        const in10Str=`${in10.getFullYear()}-${String(in10.getMonth()+1).padStart(2,"0")}-${String(in10.getDate()).padStart(2,"0")}`;
+        if(r.fechaISO===in10Str&&!r.notified5d&&!notifiedRef.current.has(r.id+"-10d")){
+          notifiedRef.current.add(r.id+"-10d");
+          new Notification("📌 Recordatorio en 10 días",{body:`${r.clientName}: ${r.descripcion}`,icon:"/favicon.ico"});
           r.notified5d=true;changed=true;
         }
         // On the day
@@ -2198,8 +2204,8 @@ function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts
   }
 
   const active=reminders.filter(r=>!r.dismissed&&r.fechaISO>=hoy);
-  const hoy5=new Date();hoy5.setDate(hoy5.getDate()+5);
-  const hoy5ISO=`${hoy5.getFullYear()}-${String(hoy5.getMonth()+1).padStart(2,"0")}-${String(hoy5.getDate()).padStart(2,"0")}`;
+  const hoy10=new Date();hoy10.setDate(hoy10.getDate()+10);
+  const hoy5ISO=`${hoy10.getFullYear()}-${String(hoy10.getMonth()+1).padStart(2,"0")}-${String(hoy10.getDate()).padStart(2,"0")}`;
 
   return(
     <div style={{background:D.white,border:`1px solid ${D.border}`,borderRadius:"16px",overflow:"hidden",boxShadow:D.shadow}}>
@@ -3108,6 +3114,118 @@ function ForecastAlert({clients}:{clients:ClientRecord[]}){
   );
 }
 
+// --- PDF Report Generator ----------------------------------------------------
+async function generarReportePDF(clients:ClientRecord[],transcripts:TranscriptInfo[],logoB64:string){
+  // Sort clients by priority: P1 closer to close first, then P2, then others
+  const prioridad=(c:ClientRecord)=>{
+    if(c.subStage==="Contrato firmado")return 0;
+    if(c.stage==="Pipeline P1"){
+      const orden:Record<string,number>={"Contrato en revisión":1,"Presentación final":2,"Visita técnica realizada":3,"Primera presentación preliminar":4,"Evaluación preliminar":5};
+      return (orden[c.subStage||""]||6)+(1/(c.mwp+0.01))*0.1;
+    }
+    if(c.stage==="Pipeline P2")return 10+(1/(c.mwp+0.01))*0.1;
+    return 20;
+  };
+  const sorted=[...clients].filter(c=>c.stage!=="Perdido").sort((a,b)=>prioridad(a)-prioridad(b));
+
+  // Generate AI summaries for each client
+  const summaries:Record<string,string>={};
+  for(const c of sorted.slice(0,20)){
+    const meetings=(c.meetings||[]).filter(m=>!m.fromDiio).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5)
+      .map(m=>`[${m.type.toUpperCase()} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
+    const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())
+      .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
+      .map(t=>`[REUNIÓN DIIO ${t.date}] ${t.transcript?.substring(0,300)||""}`);
+    const tareasPend=(c.aiTasks||[]).filter(t=>!t.done).map(t=>t.text);
+    const ctx=[...meetings,...diio].join("
+");
+    if(!ctx.trim()){summaries[c.id]=c.nextAction||c.nextStep||"Sin actividad reciente registrada.";continue;}
+    try{
+      const res=await fetch("/api/generate-actions",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          company:c.companyName,
+          stage:`${c.stage}${c.subStage?" / "+c.subStage:""}`,
+          comment:`Genera un resumen ejecutivo MUY BREVE (máximo 3 oraciones) del estado de esta oportunidad comercial. Incluye: 1) En qué punto está la negociación según el historial real, 2) El próximo paso más importante. Basate SOLO en el historial. Sé específico con fechas y nombres. NO menciones el nombre de la empresa.${tareasPend.length>0?" Pasos a seguir: "+tareasPend.join(", "):""}`,
+          transcripts:[ctx]
+        })
+      });
+      const data=await res.json() as {tasks?:string[]};
+      summaries[c.id]=(data.tasks||[]).join(" ")||c.nextAction||"Sin resumen disponible.";
+    }catch{summaries[c.id]=c.nextAction||"Sin resumen disponible.";}
+  }
+
+  // Build HTML for PDF
+  const hoy=new Date();
+  const fechaStr=`${String(hoy.getDate()).padStart(2,"0")}/${String(hoy.getMonth()+1).padStart(2,"0")}/${hoy.getFullYear()}`;
+  
+  const etapaColor=(c:ClientRecord)=>{
+    if(c.subStage==="Contrato firmado")return "#16a34a";
+    if(c.stage==="Pipeline P1"){
+      const m:Record<string,string>={"Contrato en revisión":"#7C3AED","Presentación final":"#E8500A","Visita técnica realizada":"#F59E0B","Primera presentación preliminar":"#0891B2","Evaluación preliminar":"#6B7280"};
+      return m[c.subStage||""]||"#E8500A";
+    }
+    return "#9CA3AF";
+  };
+
+  const clientRows=sorted.map((c,i)=>{
+    const color=etapaColor(c);
+    const proximaMeeting=(c.meetings||[]).find(m=>m.pending&&!m.fromDiio);
+    const summary=summaries[c.id]||c.nextAction||"Sin actividad reciente.";
+    return `
+    <div style="page-break-inside:avoid;margin-bottom:20px;border:1px solid #E8E6E1;border-radius:12px;overflow:hidden;">
+      <div style="background:${color}10;border-left:4px solid ${color};padding:12px 16px;display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:2px;">#${i+1}</div>
+          <div style="font-size:16px;font-weight:700;color:#0D0D0D;">${c.companyName}</div>
+          <div style="font-size:11px;color:${color};font-weight:600;margin-top:2px;">${c.subStage||c.stage}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:18px;font-weight:800;color:${color};">${c.mwp.toFixed(2)} MWp</div>
+          <div style="font-size:11px;color:#6B7280;">${c.closeProbabilityPct}% probabilidad</div>
+          ${proximaMeeting?`<div style="font-size:10px;color:#1D4ED8;margin-top:3px;">📅 ${proximaMeeting.date}${proximaMeeting.time?" "+proximaMeeting.time+" hrs":""}</div>`:""}
+        </div>
+      </div>
+      <div style="padding:12px 16px;">
+        <div style="font-size:12px;color:#404040;line-height:1.6;">${summary}</div>
+        ${c.nextStep?`<div style="margin-top:8px;padding:6px 10px;background:#FFF3EE;border-radius:6px;font-size:11px;color:#E8500A;font-weight:500;">🎯 Próximo paso: ${c.nextStep}</div>`:""}
+      </div>
+    </div>`;
+  }).join("");
+
+  const html=`<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+  body{font-family:'Helvetica Neue',Arial,sans-serif;margin:0;padding:0;color:#0D0D0D;background:white;}
+  @page{margin:20mm 15mm;}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+</style>
+</head><body>
+<div style="padding:24px 0 16px;border-bottom:2px solid #E8E6E1;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;">
+  <div>
+    <img src="${logoB64}" style="height:32px;margin-bottom:8px;" alt="Solarity"/>
+    <div style="font-size:20px;font-weight:800;color:#0D0D0D;">Estado del Pipeline</div>
+    <div style="font-size:12px;color:#6B7280;margin-top:2px;">Generado el ${fechaStr} · ${sorted.length} proyectos activos</div>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;">MWp total pipeline</div>
+    <div style="font-size:28px;font-weight:800;color:#E8500A;">${sorted.filter(c=>c.stage==="Pipeline P1"||c.stage==="Pipeline P2").reduce((s,c)=>s+(c.mwp||0),0).toFixed(1)}</div>
+  </div>
+</div>
+${clientRows}
+<div style="margin-top:24px;padding-top:16px;border-top:1px solid #E8E6E1;font-size:10px;color:#9CA3AF;text-align:center;">
+  Solarity SpA · Generado con CRM de Ventas · ${fechaStr}
+</div>
+</body></html>`;
+
+  // Open in new window for printing/saving as PDF
+  const win=window.open("","_blank");
+  if(!win)return;
+  win.document.write(html);
+  win.document.close();
+  setTimeout(()=>win.print(),1000);
+}
+
 // --- Main ---------------------------------------------------------------------
 export default function Home(){
   const {user,isLoaded}=useUser();
@@ -3386,6 +3504,10 @@ export default function Home(){
           <button onClick={exportToExcel}
             style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
             <span>↓</span> Exportar Excel
+          </button>
+          <button onClick={()=>generarReportePDF(activeClients,transcripts,LOGO_B64)}
+            style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
+            <span>📄</span> Reporte PDF
           </button>
           <button onClick={openCreate} className="btn-primary"
             style={{width:"100%",padding:"9px 10px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:"white",fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",boxShadow:`0 2px 12px ${D.accent}55`}}>
