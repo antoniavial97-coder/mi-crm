@@ -2093,7 +2093,7 @@ function saveReminders(r: Reminder[]){
   try{localStorage.setItem(REMINDER_STORAGE_KEY,JSON.stringify(r));}catch{}
 }
 
-function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts:TranscriptInfo[]}){
+function Recordatorios({clients,transcripts,autoAnalyzeRef}:{clients:ClientRecord[];transcripts:TranscriptInfo[];autoAnalyzeRef?:React.MutableRefObject<(()=>void)|null>}){
   const [open,setOpen]=useState(false);
   const [reminders,setReminders]=useState<Reminder[]>([]);
   const [analyzing,setAnalyzing]=useState(false);
@@ -2101,16 +2101,12 @@ function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts
   const notifiedRef=useRef<Set<string>>(new Set());
   const hoy=todayISO();
 
-  // Load reminders from localStorage on mount + auto-analyze once per day
+  // Load reminders from localStorage on mount
   useEffect(()=>{
     setReminders(getReminders());
     const la=typeof window!=="undefined"?localStorage.getItem("solar-crm:reminders-analyzed"):null;
     setLastAnalyzed(la);
-    // Auto-analyze if not done today and we have clients
-    if(la!==hoy&&clients.length>0){
-      setTimeout(()=>analyzeAll(),2000); // wait 2s for data to settle
-    }
-  },[clients.length]);// eslint-disable-line
+  },[]);
 
   // Save reminders whenever they change
   useEffect(()=>{saveReminders(reminders);},[reminders]);
@@ -2198,6 +2194,11 @@ function Recordatorios({clients,transcripts}:{clients:ClientRecord[];transcripts
     setLastAnalyzed(hoy);
     setAnalyzing(false);
   }
+
+  // Expose analyzeAll to parent via ref
+  useEffect(()=>{
+    if(autoAnalyzeRef)autoAnalyzeRef.current=analyzeAll;
+  },[clients.length,transcripts.length]);// eslint-disable-line
 
   function dismiss(id:string){
     setReminders(prev=>{const u=prev.map(r=>r.id===id?{...r,dismissed:true}:r);saveReminders(u);return u;});
@@ -3243,6 +3244,7 @@ export default function Home(){
 
   // Load recentContacts from localStorage on mount
   useEffect(()=>{setRecentContacts(getRecentContacts());},[]);
+  const autoAnalyzeRef=useRef<(()=>void)|null>(null);
   const [sheetStatus,setSheetStatus]=useState<"idle"|"loading"|"ok"|"error">("idle");
   const [activeTab,setActiveTab]=useState<Tab>("dashboard");
   const [modalOpen,setModalOpen]=useState(false);
@@ -3306,6 +3308,19 @@ export default function Home(){
     });
   },[isLoaded,userId]);
   useEffect(()=>{if(userConfig&&userId)loadFromSheet();},[userConfig,userId,loadFromSheet]);
+
+  // Auto-analyze reminders once per day after clients load
+  useEffect(()=>{
+    if(clients.length===0||!userId)return;
+    const lastAnalyzed=typeof window!=="undefined"?localStorage.getItem("solar-crm:reminders-analyzed"):null;
+    const hoyISO=todayISO();
+    if(lastAnalyzed===hoyISO)return;
+    // Wait 3s for everything to settle then analyze
+    const timer=setTimeout(()=>{
+      if(autoAnalyzeRef.current)autoAnalyzeRef.current();
+    },3000);
+    return()=>clearTimeout(timer);
+  },[clients.length,userId]);// eslint-disable-line
   // Clients are saved directly in each mutation function - no useEffect needed
 
   function updateClientTasks(clientId:string,tasks:ClientTask[]){setClients(prev=>{const u=prev.map(c=>c.id===clientId?{...c,aiTasks:tasks,updatedAtISO:todayISO()}:c);try{if(userId)saveClientsToSupabase(userId,u);}catch{}return u;});}
@@ -3561,7 +3576,7 @@ export default function Home(){
             )}
             <DashboardPanels clients={activeClients} transcripts={transcripts} onEdit={openEdit} onUpdateMeetings={updateClientMeetings} onUpdateLastContact={updateClientLastContact} onMarkContact={markRecentContact} recentContacts={recentContacts} userId={userId} alertOnly={false}/>
             <ProximasReuniones clients={activeClients} onUpdateMeetings={updateClientMeetings}/>
-            <Recordatorios clients={activeClients} transcripts={transcripts}/>
+            <Recordatorios clients={activeClients} transcripts={transcripts} autoAnalyzeRef={autoAnalyzeRef}/>
 
 
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
