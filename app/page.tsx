@@ -3135,10 +3135,9 @@ async function generarReportePDF(clients:ClientRecord[],transcripts:TranscriptIn
       .map(m=>`[${m.type.toUpperCase()} ${m.date}${m.subject?" - "+m.subject:""}] ${m.notes?.substring(0,300)||""}`);
     const diio=transcripts.filter(t=>t.company.toLowerCase()===c.companyName.toLowerCase())
       .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3)
-      .map(t=>`[REUNIÓN DIIO ${t.date}] ${t.transcript?.substring(0,300)||""}`);
+      .map(t=>`[Reunion DIIO ${t.date}] ${t.transcript?.substring(0,300)||""}`);
     const tareasPend=(c.aiTasks||[]).filter(t=>!t.done).map(t=>t.text);
-    const ctx=[...meetings,...diio].join("
-");
+    const ctx=[...meetings,...diio].join("\n");
     if(!ctx.trim()){summaries[c.id]=c.nextAction||c.nextStep||"Sin actividad reciente registrada.";continue;}
     try{
       const res=await fetch("/api/generate-actions",{
