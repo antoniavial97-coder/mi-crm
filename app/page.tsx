@@ -3217,12 +3217,16 @@ ${clientRows}
 </div>
 </body></html>`;
 
-  // Open in new window for printing/saving as PDF
-  const win=window.open("","_blank");
-  if(!win)return;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(()=>win.print(),1000);
+  // Download as HTML file that opens for printing
+  const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=`Pipeline_Solarity_${new Date().toISOString().slice(0,10)}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 // --- Main ---------------------------------------------------------------------
@@ -3504,9 +3508,14 @@ export default function Home(){
             style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
             <span>↓</span> Exportar Excel
           </button>
-          <button onClick={()=>generarReportePDF(activeClients,transcripts,LOGO_B64)}
+          <button onClick={async()=>{
+              const btn=document.getElementById("pdf-btn");
+              if(btn)btn.textContent="⏳ Generando...";
+              await generarReportePDF(activeClients,transcripts,LOGO_B64);
+              if(btn)btn.textContent="📄 Reporte PDF";
+            }}
             style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
-            <span>📄</span> Reporte PDF
+            <span id="pdf-btn">📄 Reporte PDF</span>
           </button>
           <button onClick={openCreate} className="btn-primary"
             style={{width:"100%",padding:"9px 10px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:"white",fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",boxShadow:`0 2px 12px ${D.accent}55`}}>
