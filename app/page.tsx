@@ -3233,28 +3233,22 @@ export default function Home(){
     if(!editingId){
       const newHistory:StageChange[]=[{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}];
       const newClient={id:newId(),...n,createdAtISO:now,updatedAtISO:now,stageHistory:newHistory} as ClientRecord;
-      setClients(prev=>{updated=[newClient,...prev];return updated;});
+      updated=[newClient,...clients];
+      setClients(updated);
     } else {
-      setClients(prev=>{
-        updated=prev.map(c=>{
-          if(c.id!==editingId)return c;
-          const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;
-          const newHistory:StageChange[]=stageChanged
-            ?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]
-            :(c.stageHistory||[]);
-          return {...c,...n,updatedAtISO:now,stageHistory:newHistory};
-        });
-        return updated;
+      updated=clients.map(c=>{
+        if(c.id!==editingId)return c;
+        const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;
+        const newHistory:StageChange[]=stageChanged
+          ?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]
+          :(c.stageHistory||[]);
+        return {...c,...n,updatedAtISO:now,stageHistory:newHistory};
       });
+      setClients(updated);
     }
+    // Save immediately with the correct updated array
+    if(userId)saveClientsToSupabase(userId,updated);
     setModalOpen(false);
-    // Save directly to Supabase
-    setTimeout(async()=>{
-      const current=editingId
-        ?clients.map(c=>{if(c.id!==editingId)return c;const stageChanged=c.stage!==n.stage||c.subStage!==n.subStage;const newHistory=stageChanged?[...(c.stageHistory||[]),{date:now,stage:n.stage,subStage:n.subStage,nextStep:(n as {nextStep?:string}).nextStep}]:(c.stageHistory||[]);return {...c,...n,updatedAtISO:now,stageHistory:newHistory};})
-        :[{id:newId(),...n,createdAtISO:now,updatedAtISO:now} as ClientRecord,...clients];
-      if(userId)await saveClientsToSupabase(userId,current);
-    },50);
   }
   async function extractTasksWithAI(){
     if(!draft.notes.trim()){window.alert("Escribe notas antes.");return;}
