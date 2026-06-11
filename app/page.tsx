@@ -3116,6 +3116,7 @@ function ForecastAlert({clients}:{clients:ClientRecord[]}){
 
 // --- PDF Report Generator ----------------------------------------------------
 async function generarReportePDF(clients:ClientRecord[],transcripts:TranscriptInfo[],logoB64:string){
+  console.log("PDF: starting, clients:", clients.length);
   // Sort clients by priority: P1 closer to close first, then P2, then others
   const prioridad=(c:ClientRecord)=>{
     if(c.subStage==="Contrato firmado")return 0;
@@ -3508,14 +3509,11 @@ export default function Home(){
             style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
             <span>↓</span> Exportar Excel
           </button>
-          <button onClick={async()=>{
-              const btn=document.getElementById("pdf-btn");
-              if(btn)btn.textContent="⏳ Generando...";
-              await generarReportePDF(activeClients,transcripts,LOGO_B64);
-              if(btn)btn.textContent="📄 Reporte PDF";
+          <button onClick={()=>{
+              generarReportePDF(activeClients,transcripts,LOGO_B64);
             }}
             style={{width:"100%",padding:"8px 10px",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.08)",background:"transparent",fontSize:"11px",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontWeight:500,display:"flex",alignItems:"center",gap:"6px"}}>
-            <span id="pdf-btn">📄 Reporte PDF</span>
+            <span>📄</span> Reporte PDF
           </button>
           <button onClick={openCreate} className="btn-primary"
             style={{width:"100%",padding:"9px 10px",borderRadius:"8px",border:"none",background:D.accent,fontSize:"12px",cursor:"pointer",color:"white",fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",boxShadow:`0 2px 12px ${D.accent}55`}}>
